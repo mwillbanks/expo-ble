@@ -28,7 +28,9 @@
   "author": "Christoffer Carlsson <cc@christofferc.com> (https://github.com/christoffercarlsson)",
   "license": "MIT",
   "homepage": "https://github.com/christoffercarlsson/expo-bluetooth#readme",
-  "dependencies": {},
+  "dependencies": {
+    "stedy": "^0.19.2"
+  },
   "devDependencies": {
     "@types/react": "^18.0.25",
     "expo-module-scripts": "^3.5.2",
