@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@types/react": "^18.0.25",
+    "@types/web-bluetooth": "^0.0.20",
     "expo-module-scripts": "^3.5.2",
     "expo-modules-core": "^1.12.14"
   },
