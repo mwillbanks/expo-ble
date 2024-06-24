@@ -1,6 +1,9 @@
+import CoreBluetooth
 import ExpoModulesCore
 
 let ERROR_NOT_IMPLEMENTED = 0
+let ERROR_BLUETOOTH_UNAVAILABLE = 1
+let ERROR_INVALID_SERVICES = 2
 
 struct Device {
     let uuid: String
@@ -8,15 +11,54 @@ struct Device {
     let rssi: Int8
 }
 
-class DeviceManager {
+struct CharacteristicDefinition: Decodable, Equatable, Hashable {
+    let uuid: String
+    let properties: [String]
+    let value: [UInt8]
+}
+
+struct ServiceDefinition: Decodable, Equatable, Hashable {
+    let uuid: String
+    let primary: Bool
+    let characteristics: [CharacteristicDefinition]
+}
+
+struct ServicesDefinition: Decodable, Equatable, Hashable {
+    let services: [ServiceDefinition]
+}
+
+class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, CBPeripheralManagerDelegate {
     var onConnect: ((String, String, Int8) -> Void)?
     var onDisconnect: ((String) -> Void)?
     var onChange: ((String, String, Data) -> Void)?
     var onWrite: ((String, String, Data) -> Void)?
     var onError: ((UInt8, String?, String?) -> Void)?
 
+    var centralManager: CBCentralManager?
+    var peripheralManager: CBPeripheralManager?
+    var bluetoothAvailable = false
+
+    var mutableCharacteristics: [CBUUID: CBMutableCharacteristic] = [:]
+
+    var peripherals: [CBPeripheral: Device] = [:]
+    var characteristics: [CBPeripheral: [CBCharacteristic]] = [:]
+
+    var servicesFilter: [CBUUID] = []
+    var reconnect: Bool = false
+
+    override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
+    }
+
     private func deviceError(_ code: Int, _ reason: String, _ device: Device?) {
-        onError?(UInt8(code), reason, device ? device.id : "")
+        let errorCode = UInt8(code)
+        if let device = device {
+            onError?(errorCode, reason, device.uuid)
+        } else {
+            onError?(errorCode, reason, "")
+        }
     }
 
     private func managerError(_ code: Int, _ reason: String) {
@@ -27,56 +69,245 @@ class DeviceManager {
         managerError(ERROR_NOT_IMPLEMENTED, "\(fn) is not implemented yet")
     }
 
-    func startAdvertising(_: String, _: String) {
-        notImplemented("startAdvertising")
+    private func bluetoothUnavailable() {
+        managerError(ERROR_BLUETOOTH_UNAVAILABLE, "Bluetooth unavailable")
+    }
+
+    private func invalidServices() {
+        managerError(ERROR_INVALID_SERVICES, "Failed to parse service definition")
+    }
+
+    private func getPeripheral(_ uuid: String) -> CBPeripheral? {
+        peripherals.first(where: { $0.value.uuid == uuid })?.key
+    }
+
+    private func getCharacteristic(_ device: String, _ uuid: String) -> (CBPeripheral, CBCharacteristic)? {
+        guard let peripheral = getPeripheral(device) else { return nil }
+        guard let characteristics = characteristics[peripheral] else { return nil }
+        guard let characteristic = characteristics.first(where: { $0.uuid.uuidString == uuid }) else { return nil }
+        return (peripheral, characteristic)
+    }
+
+    private func getMutableCharacteristic(_ uuidString: String) -> CBMutableCharacteristic? {
+        let uuid = CBUUID(string: uuidString)
+        return mutableCharacteristics[uuid]
+    }
+
+    private func createCharacteristic(_ def: CharacteristicDefinition) -> CBMutableCharacteristic {
+        var permissions: CBAttributePermissions = []
+        var properties: CBCharacteristicProperties = []
+        for property in def.properties {
+            switch property {
+            case "read":
+                permissions.insert(.readable)
+                properties.insert(.read)
+            case "notify":
+                properties.insert(.notify)
+            case "write":
+                permissions.insert(.writeable)
+                properties.insert(.write)
+            default:
+                continue
+            }
+        }
+        return CBMutableCharacteristic(type: CBUUID(string: def.uuid), properties: properties, value: Data(def.value), permissions: permissions)
+    }
+
+    private func createService(_ def: ServiceDefinition) -> CBMutableService {
+        let service = CBMutableService(type: CBUUID(string: def.uuid), primary: def.primary)
+        var characteristics: [CBMutableCharacteristic] = []
+        for characteristicDef in def.characteristics {
+            let characteristic = createCharacteristic(characteristicDef)
+            mutableCharacteristics[characteristic.uuid] = characteristic
+            characteristics.append(characteristic)
+        }
+        service.characteristics = characteristics
+        return service
+    }
+
+    private func createServices(_ def: ServicesDefinition) -> [CBMutableService] {
+        return def.services.map { serviceDef -> CBMutableService in
+            createService(serviceDef)
+        }
+    }
+
+    public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        if peripheral.state == .poweredOn {
+            bluetoothAvailable = true
+        } else {
+            bluetoothAvailable = false
+        }
+    }
+
+    public func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn {
+            bluetoothAvailable = true
+        } else {
+            bluetoothAvailable = false
+        }
+    }
+
+    public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
+        if !peripherals.keys.contains(peripheral) {
+            let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
+            peripherals[peripheral] = Device(uuid: peripheral.identifier.uuidString, name: name, rssi: Int8(truncating: rssi))
+            characteristics[peripheral] = []
+            peripheral.delegate = self
+            centralManager?.connect(peripheral, options: nil)
+        }
+    }
+
+    public func centralManager(_: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.discoverServices(servicesFilter)
+    }
+
+    public func centralManager(_: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error _: Error?) {
+        guard let device = peripherals[peripheral] else { return }
+        onDisconnect?(device.uuid)
+        if !reconnect {
+            peripherals.removeValue(forKey: peripheral)
+            characteristics.removeValue(forKey: peripheral)
+        } else {
+            centralManager?.connect(peripheral, options: nil)
+        }
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices _: Error?) {
+        for service in peripheral.services ?? [] {
+            peripheral.discoverCharacteristics(nil, for: service)
+        }
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error _: Error?) {
+        guard let device = peripherals[peripheral] else { return }
+        characteristics[peripheral]?.append(contentsOf: service.characteristics ?? [])
+        onConnect?(device.uuid, device.name, device.rssi)
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error _: Error?) {
+        guard let device = peripherals[peripheral] else { return }
+        guard let value = characteristic.value else { return }
+        onChange?(device.uuid, characteristic.uuid.uuidString, value)
+    }
+
+    public func peripheralManager(_: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        for request in requests {
+            if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString) {
+                onWrite?("", characteristic.uuid.uuidString, request.value ?? Data())
+                if request.characteristic.properties.contains(.write) {
+                    peripheralManager?.respond(to: request, withResult: .success)
+                }
+            } else {
+                peripheralManager?.respond(to: request, withResult: .attributeNotFound)
+            }
+        }
+    }
+
+    public func peripheralManager(_: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+        if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString) {
+            request.value = characteristic.value
+            peripheralManager?.respond(to: request, withResult: .success)
+        } else {
+            peripheralManager?.respond(to: request, withResult: .attributeNotFound)
+        }
+    }
+
+    func startAdvertising(_ name: String, _ servicesJSON: String) {
+        do {
+            let servicesData = servicesJSON.data(using: .utf8) ?? Data()
+            let def = try JSONDecoder().decode(ServicesDefinition.self, from: servicesData)
+            var serviceUUIDs: [CBUUID] = []
+            for service in createServices(def) {
+                serviceUUIDs.append(service.uuid)
+                peripheralManager?.add(service)
+            }
+            let advertisementData: [String: Any] = [
+                CBAdvertisementDataLocalNameKey: name,
+                CBAdvertisementDataServiceUUIDsKey: serviceUUIDs,
+            ]
+            peripheralManager?.startAdvertising(advertisementData)
+        } catch {
+            invalidServices()
+        }
     }
 
     func stopAdvertising() {
-        notImplemented("stopAdvertising")
+        peripheralManager?.stopAdvertising()
     }
 
-    func startScanning(_: [String], _: Bool) {
-        notImplemented("startScanning")
+    func startScanning(_ services: [String], _ reconnect: Bool) {
+        if bluetoothAvailable {
+            self.reconnect = reconnect
+            servicesFilter = []
+            for service in services {
+                servicesFilter.append(CBUUID(string: service))
+            }
+            centralManager?.scanForPeripherals(withServices: servicesFilter, options: nil)
+        } else {
+            bluetoothUnavailable()
+        }
     }
 
     func stopScanning() {
-        notImplemented("stopScanning")
+        if bluetoothAvailable {
+            centralManager?.stopScan()
+        }
     }
 
-    func connect(_: String, _: Bool) {
-        notImplemented("connect")
+    func connect(_ device: String, _ reconnect: Bool) {
+        if let peripheral = getPeripheral(device) {
+            self.reconnect = reconnect
+            centralManager?.connect(peripheral, options: nil)
+        }
     }
 
-    func disconnect(_: String) {
-        notImplemented("disconnect")
+    func disconnect(_ device: String) {
+        if let peripheral = getPeripheral(device) {
+            centralManager?.cancelPeripheralConnection(peripheral)
+        }
     }
 
-    func read(_: String, _: String) {
-        notImplemented("read")
+    func read(_ device: String, _ characteristic: String) {
+        if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
+            peripheral.readValue(for: characteristic)
+        }
     }
 
-    func subscribe(_: String, _: String) {
-        notImplemented("subscribe")
+    func subscribe(_ device: String, _ characteristic: String) {
+        if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
     }
 
-    func unsubscribe(_: String, _: String) {
-        notImplemented("unsubscribe")
+    func unsubscribe(_ device: String, _ characteristic: String) {
+        if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
+            peripheral.setNotifyValue(false, for: characteristic)
+        }
     }
 
-    func write(_: String, _: String, _: Data, _: Bool) {
-        notImplemented("write")
+    func write(_ device: String, _ characteristic: String, _ value: Data, _ withResponse: Bool) {
+        if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
+            peripheral.writeValue(value, for: characteristic, type: withResponse ? .withResponse : .withoutResponse)
+        }
     }
 
-    func set(_: String, _: String, _: Data) {
-        notImplemented("set")
+    func set(_ characteristic: String, _ value: Data) {
+        if let characteristic = getMutableCharacteristic(characteristic) {
+            characteristic.value = value
+            onChange?("", characteristic.uuid.uuidString, value)
+        }
     }
 
-    func notify(_: String, _: String, _: Data) {
-        notImplemented("notify")
+    func notify(_ characteristic: String, _ value: Data) {
+        if let characteristic = getMutableCharacteristic(characteristic) {
+            characteristic.value = value
+            onChange?("", characteristic.uuid.uuidString, value)
+            peripheralManager?.updateValue(value, for: characteristic, onSubscribedCentrals: nil)
+        }
     }
 }
 
-public class BluetoothModule: Module {
+public class ExpoBluetoothModule: Module {
     lazy var deviceManager: DeviceManager = .init()
 
     public func definition() -> ModuleDefinition {
@@ -161,12 +392,12 @@ public class BluetoothModule: Module {
             self.deviceManager.write(device, characteristic, value, withResponse)
         }
 
-        Function("set") { (device: String, characteristic: String, value: Data) in
-            self.deviceManager.set(device, characteristic, value)
+        Function("set") { (characteristic: String, value: Data) in
+            self.deviceManager.set(characteristic, value)
         }
 
-        Function("notify") { (device: String, characteristic: String, value: Data) in
-            self.deviceManager.notify(device, characteristic, value)
+        Function("notify") { (characteristic: String, value: Data) in
+            self.deviceManager.notify(characteristic, value)
         }
     }
 }
