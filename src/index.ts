@@ -35,8 +35,8 @@ export function createCharacteristic(
 }
 
 function servicesToJSON(services: Service[]): string {
-  return JSON.stringify(
-    services.map((s) => ({
+  return JSON.stringify({
+    services: services.map((s) => ({
       uuid: s.uuid,
       primary: s.primary,
       characteristics: s.characteristics.map((c) => ({
@@ -45,7 +45,7 @@ function servicesToJSON(services: Service[]): string {
         value: [...c.value]
       }))
     }))
-  )
+  })
 }
 
 export function startAdvertising(name: string, services: Service[]) {
@@ -98,12 +98,12 @@ export function write(
   )
 }
 
-export function set(device: string, characteristic: string, value: Data) {
-  return ExpoBluetoothModule.set(device, characteristic, dataAsBytes(value))
+export function set(characteristic: string, value: Data) {
+  return ExpoBluetoothModule.set(characteristic, dataAsBytes(value))
 }
 
-export function notify(device: string, characteristic: string, value: Data) {
-  return ExpoBluetoothModule.notify(device, characteristic, dataAsBytes(value))
+export function notify(characteristic: string, value: Data) {
+  return ExpoBluetoothModule.notify(characteristic, dataAsBytes(value))
 }
 
 const emitter = new EventEmitter(

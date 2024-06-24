@@ -205,11 +205,11 @@ class DeviceManager {
     this.valueWritten(characteristic, value)
   }
 
-  set(device: string, characteristic: string, value: Uint8Array) {
+  set(characteristic: string, value: Uint8Array) {
     this.notImplemented('set')
   }
 
-  notify(device: string, characteristic: string, value: Uint8Array) {
+  notify(characteristic: string, value: Uint8Array) {
     this.notImplemented('notify')
   }
 }
@@ -270,10 +270,10 @@ export default {
   ) {
     return deviceManager.write(device, characteristic, value, withResponse)
   },
-  set(device: string, characteristic: string, value: Uint8Array) {
-    return deviceManager.set(device, characteristic, value)
+  set(characteristic: string, value: Uint8Array) {
+    return deviceManager.set(characteristic, value)
   },
-  notify(device: string, characteristic: string, value: Uint8Array) {
-    return deviceManager.notify(device, characteristic, value)
+  notify(characteristic: string, value: Uint8Array) {
+    return deviceManager.notify(characteristic, value)
   }
 }

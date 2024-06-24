@@ -66,16 +66,16 @@ class DeviceManager {
         notImplemented("write")
     }
 
-    fun set(device: String, characteristic: String, value: ByteArray) {
+    fun set(characteristic: String, value: ByteArray) {
         notImplemented("set")
     }
 
-    fun notify(device: String, characteristic: String, value: ByteArray) {
+    fun notify(characteristic: String, value: ByteArray) {
         notImplemented("notify")
     }
 }
 
-class BluetoothModule : Module() {
+class ExpoBluetoothModule : Module() {
     private val deviceManager: DeviceManager = DeviceManager()
 
     override fun definition() = ModuleDefinition {
@@ -143,12 +143,12 @@ class BluetoothModule : Module() {
             deviceManager.write(device, characteristic, value, withResponse)
         }
 
-        Function("set") { device: String, characteristic: String, value: ByteArray ->
-            deviceManager.set(device, characteristic, value)
+        Function("set") { characteristic: String, value: ByteArray ->
+            deviceManager.set(characteristic, value)
         }
 
-        Function("notify") { device: String, characteristic: String, value: ByteArray ->
-            deviceManager.notify(device, characteristic, value)
+        Function("notify") { characteristic: String, value: ByteArray ->
+            deviceManager.notify(characteristic, value)
         }
     }
 }
