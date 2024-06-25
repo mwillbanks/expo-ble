@@ -28,7 +28,9 @@ struct ServicesDefinition: Decodable, Equatable, Hashable {
 }
 
 class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, CBPeripheralManagerDelegate {
-    var onConnect: ((String, String, Int8) -> Void)?
+    var onReady: (() -> Void)?
+    var onDiscover: ((String, String, Int8) -> Void)?
+    var onConnect: ((String) -> Void)?
     var onDisconnect: ((String) -> Void)?
     var onChange: ((String, String, Data) -> Void)?
     var onWrite: ((String, String, Data) -> Void)?
@@ -36,6 +38,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
 
     var centralManager: CBCentralManager?
     var peripheralManager: CBPeripheralManager?
+
     var bluetoothAvailable = false
 
     var mutableCharacteristics: [CBUUID: CBMutableCharacteristic] = [:]
@@ -45,12 +48,6 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
 
     var servicesFilter: [CBUUID] = []
     var reconnect: Bool = false
-
-    override init() {
-        super.init()
-        centralManager = CBCentralManager(delegate: self, queue: nil)
-        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
-    }
 
     private func deviceError(_ code: Int, _ reason: String, _ device: Device?) {
         let errorCode = UInt8(code)
@@ -110,7 +107,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
                 continue
             }
         }
-        return CBMutableCharacteristic(type: CBUUID(string: def.uuid), properties: properties, value: Data(def.value), permissions: permissions)
+        return CBMutableCharacteristic(type: CBUUID(string: def.uuid), properties: properties, value: nil, permissions: permissions)
     }
 
     private func createService(_ def: ServiceDefinition) -> CBMutableService {
@@ -132,28 +129,27 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
-        if peripheral.state == .poweredOn {
+        if !bluetoothAvailable && peripheral.state == .poweredOn {
             bluetoothAvailable = true
-        } else {
-            bluetoothAvailable = false
+            onReady?()
         }
     }
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state == .poweredOn {
+        if !bluetoothAvailable && central.state == .poweredOn {
             bluetoothAvailable = true
-        } else {
-            bluetoothAvailable = false
+            onReady?()
         }
     }
 
     public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
         if !peripherals.keys.contains(peripheral) {
             let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-            peripherals[peripheral] = Device(uuid: peripheral.identifier.uuidString, name: name, rssi: Int8(truncating: rssi))
+            let device = Device(uuid: peripheral.identifier.uuidString, name: name, rssi: Int8(truncating: rssi))
+            peripherals[peripheral] = device
             characteristics[peripheral] = []
             peripheral.delegate = self
-            centralManager?.connect(peripheral, options: nil)
+            onDiscover?(device.uuid, device.name, device.rssi)
         }
     }
 
@@ -181,7 +177,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error _: Error?) {
         guard let device = peripherals[peripheral] else { return }
         characteristics[peripheral]?.append(contentsOf: service.characteristics ?? [])
-        onConnect?(device.uuid, device.name, device.rssi)
+        onConnect?(device.uuid)
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error _: Error?) {
@@ -193,7 +189,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     public func peripheralManager(_: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         for request in requests {
             if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString) {
-                onWrite?("", characteristic.uuid.uuidString, request.value ?? Data())
+                onChange?("", characteristic.uuid.uuidString, request.value ?? Data())
                 if request.characteristic.properties.contains(.write) {
                     peripheralManager?.respond(to: request, withResult: .success)
                 }
@@ -210,6 +206,11 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         } else {
             peripheralManager?.respond(to: request, withResult: .attributeNotFound)
         }
+    }
+
+    func start() {
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
     }
 
     func startAdvertising(_ name: String, _ servicesJSON: String) {
@@ -236,22 +237,16 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     func startScanning(_ services: [String], _ reconnect: Bool) {
-        if bluetoothAvailable {
-            self.reconnect = reconnect
-            servicesFilter = []
-            for service in services {
-                servicesFilter.append(CBUUID(string: service))
-            }
-            centralManager?.scanForPeripherals(withServices: servicesFilter, options: nil)
-        } else {
-            bluetoothUnavailable()
+        self.reconnect = reconnect
+        servicesFilter = []
+        for service in services {
+            servicesFilter.append(CBUUID(string: service))
         }
+        centralManager?.scanForPeripherals(withServices: servicesFilter, options: nil)
     }
 
     func stopScanning() {
-        if bluetoothAvailable {
-            centralManager?.stopScan()
-        }
+        centralManager?.stopScan()
     }
 
     func connect(_ device: String, _ reconnect: Bool) {
@@ -295,13 +290,6 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         if let characteristic = getMutableCharacteristic(characteristic) {
             characteristic.value = value
             onChange?("", characteristic.uuid.uuidString, value)
-        }
-    }
-
-    func notify(_ characteristic: String, _ value: Data) {
-        if let characteristic = getMutableCharacteristic(characteristic) {
-            characteristic.value = value
-            onChange?("", characteristic.uuid.uuidString, value)
             peripheralManager?.updateValue(value, for: characteristic, onSubscribedCentrals: nil)
         }
     }
@@ -313,15 +301,23 @@ public class ExpoBluetoothModule: Module {
     public func definition() -> ModuleDefinition {
         Name("ExpoBluetooth")
 
-        Events("onConnect", "onDisconnect", "onChange", "onWrite", "onError")
+        Events("onReady", "onDiscover", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
 
         OnCreate {
             _ = self.deviceManager
-            self.deviceManager.onConnect = { (device: String, name: String, rssi: Int8) in
-                self.sendEvent("onConnect", [
+            self.deviceManager.onReady = {
+                self.sendEvent("onReady")
+            }
+            self.deviceManager.onDiscover = { (device: String, name: String, rssi: Int8) in
+                self.sendEvent("onDiscover", [
                     "device": device,
                     "name": name,
                     "rssi": rssi,
+                ])
+            }
+            self.deviceManager.onConnect = { (device: String) in
+                self.sendEvent("onConnect", [
+                    "device": device,
                 ])
             }
             self.deviceManager.onDisconnect = { (device: String) in
@@ -352,52 +348,52 @@ public class ExpoBluetoothModule: Module {
             }
         }
 
-        Function("startAdvertising") { (name: String, servicesJSON: String) in
+        AsyncFunction("start") {
+            self.deviceManager.start()
+        }
+
+        AsyncFunction("startAdvertising") { (name: String, servicesJSON: String) in
             self.deviceManager.startAdvertising(name, servicesJSON)
         }
 
-        Function("stopAdvertising") {
+        AsyncFunction("stopAdvertising") {
             self.deviceManager.stopAdvertising()
         }
 
-        Function("startScanning") { (services: [String], reconnect: Bool) in
+        AsyncFunction("startScanning") { (services: [String], reconnect: Bool) in
             self.deviceManager.startScanning(services, reconnect)
         }
 
-        Function("stopScanning") {
+        AsyncFunction("stopScanning") {
             self.deviceManager.stopScanning()
         }
 
-        Function("connect") { (device: String, reconnect: Bool) in
+        AsyncFunction("connect") { (device: String, reconnect: Bool) in
             self.deviceManager.connect(device, reconnect)
         }
 
-        Function("disconnect") { (device: String) in
+        AsyncFunction("disconnect") { (device: String) in
             self.deviceManager.disconnect(device)
         }
 
-        Function("read") { (device: String, characteristic: String) in
+        AsyncFunction("read") { (device: String, characteristic: String) in
             self.deviceManager.read(device, characteristic)
         }
 
-        Function("subscribe") { (device: String, characteristic: String) in
+        AsyncFunction("subscribe") { (device: String, characteristic: String) in
             self.deviceManager.subscribe(device, characteristic)
         }
 
-        Function("unsubscribe") { (device: String, characteristic: String) in
+        AsyncFunction("unsubscribe") { (device: String, characteristic: String) in
             self.deviceManager.unsubscribe(device, characteristic)
         }
 
-        Function("write") { (device: String, characteristic: String, value: Data, withResponse: Bool) in
+        AsyncFunction("write") { (device: String, characteristic: String, value: Data, withResponse: Bool) in
             self.deviceManager.write(device, characteristic, value, withResponse)
         }
 
-        Function("set") { (characteristic: String, value: Data) in
+        AsyncFunction("set") { (characteristic: String, value: Data) in
             self.deviceManager.set(characteristic, value)
-        }
-
-        Function("notify") { (characteristic: String, value: Data) in
-            self.deviceManager.notify(characteristic, value)
         }
     }
 }

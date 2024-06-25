@@ -14,10 +14,14 @@ export type Service = {
   characteristics: Characteristic[]
 }
 
-export type ConnectEvent = {
+export type DiscoverEvent = {
   device: string
   name: string
   rssi: number
+}
+
+export type ConnectEvent = {
+  device: string
 }
 
 export type DisconnectEvent = {

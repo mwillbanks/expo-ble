@@ -3,7 +3,7 @@ import {
   EventEmitter,
   Subscription
 } from 'expo-modules-core'
-import { ENCODING_BASE64_URLSAFE, createFrom } from 'stedy'
+import { ENCODING_UTF8, createFrom } from 'stedy'
 
 import {
   Data,
@@ -14,12 +14,13 @@ import {
   DisconnectEvent,
   ChangeEvent,
   WriteEvent,
-  ErrorEvent
+  ErrorEvent,
+  DiscoverEvent
 } from './ExpoBluetooth.types'
 import ExpoBluetoothModule from './ExpoBluetoothModule'
 
 function dataAsBytes(data?: Data): Uint8Array {
-  return new Uint8Array(createFrom(data, ENCODING_BASE64_URLSAFE))
+  return new Uint8Array(createFrom(data, ENCODING_UTF8))
 }
 
 export function createCharacteristic(
@@ -31,6 +32,18 @@ export function createCharacteristic(
     uuid,
     properties: new Set(properties),
     value: dataAsBytes(value)
+  }
+}
+
+export function createService(
+  uuid: string,
+  primary: boolean,
+  ...characteristics: Characteristic[]
+): Service {
+  return {
+    uuid,
+    primary,
+    characteristics
   }
 }
 
@@ -48,43 +61,47 @@ function servicesToJSON(services: Service[]): string {
   })
 }
 
-export function startAdvertising(name: string, services: Service[]) {
+export function start() {
+  return ExpoBluetoothModule.start()
+}
+
+export async function startAdvertising(name: string, ...services: Service[]) {
   return ExpoBluetoothModule.startAdvertising(name, servicesToJSON(services))
 }
 
-export function stopAdvertising() {
+export async function stopAdvertising() {
   return ExpoBluetoothModule.stopAdvertising()
 }
 
-export function startScanning(services: string[], reconnect: boolean = false) {
-  return ExpoBluetoothModule.startScanning(services, reconnect)
+export async function startScanning(...services: string[]) {
+  return ExpoBluetoothModule.startScanning(services, false)
 }
 
-export function stopScanning() {
+export async function stopScanning() {
   return ExpoBluetoothModule.stopScanning()
 }
 
-export function connect(device: string, reconnect: boolean = false) {
+export async function connect(device: string, reconnect: boolean = false) {
   return ExpoBluetoothModule.connect(device, reconnect)
 }
 
-export function disconnect(device: string) {
+export async function disconnect(device: string) {
   return ExpoBluetoothModule.disconnect(device)
 }
 
-export function read(device: string, characteristic: string) {
+export async function read(device: string, characteristic: string) {
   return ExpoBluetoothModule.read(device, characteristic)
 }
 
-export function subscribe(device: string, characteristic: string) {
+export async function subscribe(device: string, characteristic: string) {
   return ExpoBluetoothModule.subscribe(device, characteristic)
 }
 
-export function unsubscribe(device: string, characteristic: string) {
+export async function unsubscribe(device: string, characteristic: string) {
   return ExpoBluetoothModule.unsubscribe(device, characteristic)
 }
 
-export function write(
+export async function write(
   device: string,
   characteristic: string,
   value: Data,
@@ -98,17 +115,23 @@ export function write(
   )
 }
 
-export function set(characteristic: string, value: Data) {
+export async function set(characteristic: string, value: Data) {
   return ExpoBluetoothModule.set(characteristic, dataAsBytes(value))
-}
-
-export function notify(characteristic: string, value: Data) {
-  return ExpoBluetoothModule.notify(characteristic, dataAsBytes(value))
 }
 
 const emitter = new EventEmitter(
   ExpoBluetoothModule ?? NativeModulesProxy.ExpoBluetooth
 )
+
+export function addReadyListener(listener: () => void): Subscription {
+  return emitter.addListener('onReady', listener)
+}
+
+export function addDiscoverListener(
+  listener: (event: DiscoverEvent) => void
+): Subscription {
+  return emitter.addListener<DiscoverEvent>('onDiscover', listener)
+}
 
 export function addConnectListener(
   listener: (event: ConnectEvent) => void
@@ -145,6 +168,7 @@ export {
   CharacteristicProperty,
   Characteristic,
   Service,
+  DiscoverEvent,
   ConnectEvent,
   DisconnectEvent,
   ChangeEvent,

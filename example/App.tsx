@@ -1,4 +1,4 @@
-import * as Bluetooth from 'expo-bluetooth'
+import * as Bluetooth from 'expo-ble'
 import { useEffect, useState } from 'react'
 import { StyleSheet, Text, View, Pressable, Platform } from 'react-native'
 import { createFrom } from 'stedy'
@@ -10,88 +10,96 @@ export default function App() {
   const [role, setRole] = useState<string>(
     Platform.OS === 'web' ? 'central' : ''
   )
+  const [isReady, setReady] = useState(false)
   const [isConnected, setConnected] = useState(false)
+  const [isAdvertising, setAdvertising] = useState(false)
   const [isScanning, setScanning] = useState(false)
-  const [device, setDevice] = useState<string>('')
-  const [name, setName] = useState<string>('')
-  const [value, setValue] = useState<string>('')
+  const [device, setDevice] = useState<string>()
+  const [name, setName] = useState<string>()
+  const [value, setValue] = useState<string>()
 
   useEffect(() => {
-    Bluetooth.addConnectListener((event) => {
-      setConnected(true)
+    const readySubscription = Bluetooth.addReadyListener(() => {
+      setReady(true)
+    })
+    const discoverSubscription = Bluetooth.addDiscoverListener(
+      (event: Bluetooth.DiscoverEvent) => {
+        setDevice(event.device)
+        setName(event.name)
+      }
+    )
+    const connectSubscription = Bluetooth.addConnectListener(() => {
       setScanning(false)
-      setDevice(event.device)
-      setName(event.name)
-      if (role === 'central') {
-        Bluetooth.subscribe(event.device, VALUE_CHARACTERISTIC)
-        Bluetooth.read(event.device, VALUE_CHARACTERISTIC)
-      }
+      setConnected(true)
     })
-    Bluetooth.addDisconnectListener((event) => {
+    const disconnectSubscription = Bluetooth.addDisconnectListener(() => {
       setConnected(false)
-      if (role === 'central') {
-        setScanning(false)
-        setName('Unknown')
-        setValue('Unknown')
+    })
+    const changeSubscription = Bluetooth.addChangeListener(
+      (event: Bluetooth.ChangeEvent) => {
+        setValue(createFrom(event.value).toString())
       }
-    })
-    Bluetooth.addChangeListener((event) => {
-      setValue(event.value.toString())
-    })
+    )
+    Bluetooth.start()
+    return () => {
+      readySubscription.remove()
+      discoverSubscription.remove()
+      connectSubscription.remove()
+      disconnectSubscription.remove()
+      changeSubscription.remove()
+    }
   }, [])
 
   useEffect(() => {
-    if (
-      isConnected &&
-      role === 'central' &&
-      value.length > 0 &&
-      device.length > 0
-    ) {
+    if (!isReady) {
+      return
+    }
+    if (isAdvertising) {
+      Bluetooth.startAdvertising(
+        'Expo Peripheral',
+        Bluetooth.createService(
+          SERVICE_UUID,
+          true,
+          Bluetooth.createCharacteristic(VALUE_CHARACTERISTIC, [
+            'read',
+            'write',
+            'notify'
+          ])
+        )
+      )
+    } else {
+      Bluetooth.stopAdvertising()
+    }
+  }, [isReady, isAdvertising])
+
+  useEffect(() => {
+    if (!isReady) {
+      return
+    }
+    if (isScanning) {
+      Bluetooth.startScanning(SERVICE_UUID)
+    } else {
+      Bluetooth.stopScanning()
+    }
+  }, [isReady, isScanning])
+
+  useEffect(() => {
+    if (isReady && isConnected) {
+      Bluetooth.read(device, VALUE_CHARACTERISTIC)
+    }
+  }, [isReady, isConnected, device])
+
+  useEffect(() => {
+    if (!(isReady && isConnected && device && value)) {
+      return
+    }
+    if (role === 'central') {
       Bluetooth.write(device, VALUE_CHARACTERISTIC, createFrom(value))
     }
-    if (role === 'peripheral' && value.length > 0) {
-      Bluetooth.notify(VALUE_CHARACTERISTIC, createFrom(value))
-    }
-  }, [role, value, isConnected, device])
-
-  useEffect(() => {
-    if (role === 'central') {
-      if (isScanning) {
-        Bluetooth.startScanning([SERVICE_UUID])
-      } else {
-        Bluetooth.stopScanning()
-      }
-    }
-  }, [role, isScanning])
-
-  useEffect(() => {
     if (role === 'peripheral') {
-      setName('Expo Bluetooth')
-    } else {
-      setName('Unknown')
-      setConnected(false)
-      setScanning(false)
+      Bluetooth.set(VALUE_CHARACTERISTIC, createFrom(value))
     }
-    setValue('Unknown')
-  }, [role])
-
-  useEffect(() => {
-    if (role === 'peripheral' && name !== '') {
-      Bluetooth.startAdvertising(name, [
-        {
-          primary: true,
-          uuid: SERVICE_UUID,
-          characteristics: [
-            Bluetooth.createCharacteristic(VALUE_CHARACTERISTIC, [
-              'read',
-              'notify',
-              'write'
-            ])
-          ]
-        }
-      ])
-    }
-  }, [role, name])
+  }, [isReady, isConnected, device, role, value])
 
   return (
     <View style={styles.container}>
@@ -149,7 +157,6 @@ export default function App() {
             <Pressable
               style={styles.button}
               onPress={() => {
-                setConnected(false)
                 setScanning(true)
               }}>
               <Text style={styles.buttonText}>Start scanning</Text>
@@ -162,6 +169,28 @@ export default function App() {
                 setScanning(false)
               }}>
               <Text style={styles.buttonText}>Stop scanning</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+      {role === 'peripheral' && (
+        <View>
+          {isAdvertising || (
+            <Pressable
+              style={styles.button}
+              onPress={() => {
+                setAdvertising(true)
+              }}>
+              <Text style={styles.buttonText}>Start advertising</Text>
+            </Pressable>
+          )}
+          {isAdvertising && (
+            <Pressable
+              style={styles.button}
+              onPress={() => {
+                setAdvertising(false)
+              }}>
+              <Text style={styles.buttonText}>Stop advertising</Text>
             </Pressable>
           )}
         </View>

@@ -12,7 +12,11 @@ type Device = {
   rssi: number
 }
 
-type ConnectHandler = (device: string, name: string, rssi: number) => void
+type ReadyHandler = () => void
+
+type DiscoverHandler = (device: string, name: string, rssi: number) => void
+
+type ConnectHandler = (device: string) => void
 
 type DisconnectHandler = (device: string) => void
 
@@ -31,6 +35,8 @@ type WriteHandler = (
 type ErrorHandler = (code: number, reason: string, device: string) => void
 
 class DeviceManager {
+  private onReady: ReadyHandler
+  private onDiscover: DiscoverHandler
   private onConnect: ConnectHandler
   private onDisconnect: DisconnectHandler
   private onChange: ChangeHandler
@@ -46,18 +52,24 @@ class DeviceManager {
   private characteristics: Map<string, BluetoothRemoteGATTCharacteristic>
 
   constructor({
+    onReady,
+    onDiscover,
     onConnect,
     onDisconnect,
     onChange,
     onWrite,
     onError
   }: {
+    onReady: ReadyHandler
+    onDiscover: DiscoverHandler
     onConnect: ConnectHandler
     onDisconnect: DisconnectHandler
     onChange: ChangeHandler
     onWrite: WriteHandler
     onError: ErrorHandler
   }) {
+    this.onReady = onReady
+    this.onDiscover = onDiscover
     this.onConnect = onConnect
     this.onDisconnect = onDisconnect
     this.onChange = onChange
@@ -87,10 +99,12 @@ class DeviceManager {
 
   private deviceConnected(device: BluetoothDevice) {
     this.device = { uuid: device.id, name: device.name || 'Unkown', rssi: -42 }
-    this.onConnect(this.device.uuid, this.device.name, this.device.rssi)
+    this.onDiscover(this.device.uuid, this.device.name, this.device.rssi)
+    this.onConnect(this.device.uuid)
   }
 
   private valueChanged(characteristic: string, value: BufferSource) {
+    console.log('value changed', characteristic, value)
     if (this.device) {
       this.onChange(
         this.device.uuid,
@@ -114,18 +128,29 @@ class DeviceManager {
     })
   }
 
-  private async start(services: string[], reconnect: boolean) {
+  private async requestDevice(services: string[], reconnect: boolean) {
     this.isScanning = true
     this.reconnect = reconnect
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services }]
-    })
-    this.gattServer = await device.gatt?.connect()
-    await Promise.all(
-      services.map((service) => this.discoverCharacteristics(service))
-    )
-    this.isScanning = false
-    this.deviceConnected(device)
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services }]
+      })
+      this.gattServer = await device.gatt?.connect()
+      await Promise.all(
+        services.map((service) => this.discoverCharacteristics(service))
+      )
+      this.deviceConnected(device)
+    } finally {
+      this.isScanning = false
+    }
+  }
+
+  start() {
+    if (this.bluetoothAvailable) {
+      this.onReady()
+    } else {
+      this.bluetoothUnavailable()
+    }
   }
 
   startAdvertising(name: string, servicesJSON: string) {
@@ -137,24 +162,15 @@ class DeviceManager {
   }
 
   startScanning(services: string[], reconnect: boolean) {
-    if (this.bluetoothAvailable) {
-      if (!this.isScanning) {
-        this.start(services, reconnect)
-      }
-    } else {
-      this.bluetoothUnavailable()
+    if (!this.isScanning) {
+      this.characteristics.clear()
+      this.isScanning = true
+      this.requestDevice(services, reconnect)
     }
   }
 
   stopScanning() {
-    this.characteristics.clear()
     this.isScanning = false
-    if (this.bluetoothAvailable && this.gattServer?.connected) {
-      this.gattServer.disconnect()
-    }
-    if (this.device) {
-      this.onDisconnect(this.device.name)
-    }
   }
 
   connect(device: string, reconnect: boolean) {
@@ -162,7 +178,14 @@ class DeviceManager {
   }
 
   disconnect() {
-    this.stopScanning()
+    this.characteristics.clear()
+    this.isScanning = false
+    if (this.gattServer?.connected) {
+      this.gattServer.disconnect()
+    }
+    if (this.device) {
+      this.onDisconnect(this.device.uuid)
+    }
   }
 
   read(device: string, characteristic: string) {
@@ -174,17 +197,18 @@ class DeviceManager {
       })
   }
 
-  subscribe(device: string, characteristic: string) {
+  async subscribe(device: string, characteristic: string) {
     const c = this.characteristics.get(characteristic)
+    await c?.startNotifications()
     c?.addEventListener('characteristicvaluechanged', (event) => {
+      console.log(event)
       // @ts-ignore
       this.valueChanged(characteristic, event.target.value)
     })
-    c?.startNotifications()
   }
 
   unsubscribe(device: string, characteristic: string) {
-    this.characteristics.get(characteristic)?.stopNotifications()
+    return this.characteristics.get(characteristic)?.stopNotifications()
   }
 
   write(
@@ -208,20 +232,22 @@ class DeviceManager {
   set(characteristic: string, value: Uint8Array) {
     this.notImplemented('set')
   }
-
-  notify(characteristic: string, value: Uint8Array) {
-    this.notImplemented('notify')
-  }
 }
 
 const emitter = new EventEmitter({} as any)
 
 const deviceManager = new DeviceManager({
-  onConnect: (device: string, name: string, rssi: number) => {
-    emitter.emit('onConnect', { device, name, rssi })
+  onReady: () => {
+    emitter.emit('onReady')
   },
-  onDisconnect: (device?: string) => {
-    emitter.emit('onDisconnect', { device: device || '' })
+  onDiscover: (device: string, name: string, rssi: number) => {
+    emitter.emit('onDiscover', { device, name, rssi })
+  },
+  onConnect: (device: string) => {
+    emitter.emit('onConnect', { device })
+  },
+  onDisconnect: (device: string) => {
+    emitter.emit('onDisconnect', { device })
   },
   onChange: (device: string, characteristic: string, value: Uint8Array) => {
     emitter.emit('onChange', { device, characteristic, value })
@@ -235,6 +261,9 @@ const deviceManager = new DeviceManager({
 })
 
 export default {
+  start() {
+    return deviceManager.start()
+  },
   startAdvertising(name: string, servicesJSON: string) {
     return deviceManager.startAdvertising(name, servicesJSON)
   },
@@ -272,8 +301,5 @@ export default {
   },
   set(characteristic: string, value: Uint8Array) {
     return deviceManager.set(characteristic, value)
-  },
-  notify(characteristic: string, value: Uint8Array) {
-    return deviceManager.notify(characteristic, value)
   }
 }

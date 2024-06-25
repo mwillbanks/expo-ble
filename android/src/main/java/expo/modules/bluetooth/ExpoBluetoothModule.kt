@@ -8,7 +8,9 @@ private const val ERROR_NOT_IMPLEMENTED = 0
 data class Device(val uuid: String, val name: String, val rssi: Int)
 
 class DeviceManager {
-    var onConnect: ((String, String, Int) -> Unit)? = null
+    var onReady: (() -> Unit)? = null
+    var onDiscover: ((String, String, Int) -> Unit)? = null
+    var onConnect: ((String) -> Unit)? = null
     var onDisconnect: ((String) -> Unit)? = null
     var onChange: ((String, String, ByteArray) -> Unit)? = null
     var onWrite: ((String, String, ByteArray) -> Unit)? = null
@@ -24,6 +26,10 @@ class DeviceManager {
 
     private fun notImplemented(fn: String) {
         managerError(ERROR_NOT_IMPLEMENTED, "$fn is not implemented yet")
+    }
+
+    fun start() {
+        notImplemented("start")
     }
 
     fun startAdvertising(name: String, servicesJSON: String) {
@@ -68,11 +74,7 @@ class DeviceManager {
 
     fun set(characteristic: String, value: ByteArray) {
         notImplemented("set")
-    }
-
-    fun notify(characteristic: String, value: ByteArray) {
-        notImplemented("notify")
-    }
+    } 
 }
 
 class ExpoBluetoothModule : Module() {
@@ -81,12 +83,18 @@ class ExpoBluetoothModule : Module() {
     override fun definition() = ModuleDefinition {
         Name("ExpoBluetooth")
 
-        Events("onConnect", "onDisconnect", "onChange", "onWrite", "onError")
+        Events("onReady", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
 
         OnCreate {
             deviceManager.apply {
-                onConnect = { device, name, rssi ->
-                    sendEvent("onConnect", mapOf("device" to device, "name" to name, "rssi" to rssi))
+                onReady = {
+                  sendEvent("onReady")
+                }
+                onDiscover = { device, name, rssi ->
+                    sendEvent("onDiscover", mapOf("device" to device, "name" to name, "rssi" to rssi))
+                }
+                onConnect = { device ->
+                    sendEvent("onConnect", mapOf("device" to device))
                 }
                 onDisconnect = { device ->
                     sendEvent("onDisconnect", mapOf("device" to device))
@@ -103,52 +111,52 @@ class ExpoBluetoothModule : Module() {
             }
         }
 
-        Function("startAdvertising") { name: String, servicesJSON: String ->
+        AsyncFunction("start") {
+            deviceManager.start()
+        }
+
+        AsyncFunction("startAdvertising") { name: String, servicesJSON: String ->
             deviceManager.startAdvertising(name, servicesJSON)
         }
 
-        Function("stopAdvertising") {
+        AsyncFunction("stopAdvertising") {
             deviceManager.stopAdvertising()
         }
 
-        Function("startScanning") { services: List<String>, reconnect: Boolean ->
+        AsyncFunction("startScanning") { services: List<String>, reconnect: Boolean ->
             deviceManager.startScanning(services, reconnect)
         }
 
-        Function("stopScanning") {
+        AsyncFunction("stopScanning") {
             deviceManager.stopScanning()
         }
 
-        Function("connect") { device: String, reconnect: Boolean ->
+        AsyncFunction("connect") { device: String, reconnect: Boolean ->
             deviceManager.connect(device, reconnect)
         }
 
-        Function("disconnect") { device: String ->
+        AsyncFunction("disconnect") { device: String ->
             deviceManager.disconnect(device)
         }
 
-        Function("read") { device: String, characteristic: String ->
+        AsyncFunction("read") { device: String, characteristic: String ->
             deviceManager.read(device, characteristic)
         }
 
-        Function("subscribe") { device: String, characteristic: String ->
+        AsyncFunction("subscribe") { device: String, characteristic: String ->
             deviceManager.subscribe(device, characteristic)
         }
 
-        Function("unsubscribe") { device: String, characteristic: String ->
+        AsyncFunction("unsubscribe") { device: String, characteristic: String ->
             deviceManager.unsubscribe(device, characteristic)
         }
 
-        Function("write") { device: String, characteristic: String, value: ByteArray, withResponse: Boolean ->
+        AsyncFunction("write") { device: String, characteristic: String, value: ByteArray, withResponse: Boolean ->
             deviceManager.write(device, characteristic, value, withResponse)
         }
 
-        Function("set") { characteristic: String, value: ByteArray ->
+        AsyncFunction("set") { characteristic: String, value: ByteArray ->
             deviceManager.set(characteristic, value)
-        }
-
-        Function("notify") { characteristic: String, value: ByteArray ->
-            deviceManager.notify(characteristic, value)
         }
     }
 }
