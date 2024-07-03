@@ -186,10 +186,7 @@ class DeviceManager(private val context: Context) {
         notImplemented("stopAdvertising")
     }
 
-    fun startScanning(
-        services: List<String>,
-        reconnect: Boolean,
-    ) {
+    fun startScanning(services: List<String>) {
         val scanFilters =
             services.map { uuid ->
                 ScanFilter.Builder()
@@ -312,8 +309,8 @@ class ExpoBluetoothModule : Module() {
                 deviceManager?.stopAdvertising()
             }
 
-            AsyncFunction("startScanning") { services: List<String>, reconnect: Boolean ->
-                deviceManager?.startScanning(services, reconnect)
+            AsyncFunction("startScanning") { services: List<String> ->
+                deviceManager?.startScanning(services)
             }
 
             AsyncFunction("stopScanning") {
