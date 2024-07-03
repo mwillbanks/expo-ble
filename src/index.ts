@@ -74,7 +74,7 @@ export async function stopAdvertising() {
 }
 
 export async function startScanning(...services: string[]) {
-  return ExpoBluetoothModule.startScanning(services, false)
+  return ExpoBluetoothModule.startScanning(services)
 }
 
 export async function stopScanning() {

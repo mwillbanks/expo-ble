@@ -46,9 +46,10 @@ class DeviceManager {
   private bluetoothAvailable: boolean
   private isScanning: boolean
   private reconnect: boolean
-
   private gattServer?: BluetoothRemoteGATTServer
+  private bluetoothDevice?: BluetoothDevice
   private device?: Device
+  private services?: string[]
   private characteristics: Map<string, BluetoothRemoteGATTCharacteristic>
 
   constructor({
@@ -97,14 +98,7 @@ class DeviceManager {
     this.managerError(ERROR_BLUETOOTH_UNAVAILABLE, 'Bluetooth unavailable')
   }
 
-  private deviceConnected(device: BluetoothDevice) {
-    this.device = { uuid: device.id, name: device.name || 'Unkown', rssi: -42 }
-    this.onDiscover(this.device.uuid, this.device.name, this.device.rssi)
-    this.onConnect(this.device.uuid)
-  }
-
   private valueChanged(characteristic: string, value: BufferSource) {
-    console.log('value changed', characteristic, value)
     if (this.device) {
       this.onChange(
         this.device.uuid,
@@ -128,18 +122,18 @@ class DeviceManager {
     })
   }
 
-  private async requestDevice(services: string[], reconnect: boolean) {
+  private async requestDevice() {
     this.isScanning = true
-    this.reconnect = reconnect
     try {
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services }]
+      this.bluetoothDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ services: this.services || [] }]
       })
-      this.gattServer = await device.gatt?.connect()
-      await Promise.all(
-        services.map((service) => this.discoverCharacteristics(service))
-      )
-      this.deviceConnected(device)
+      this.device = {
+        uuid: this.bluetoothDevice.id,
+        name: this.bluetoothDevice.name || '',
+        rssi: -42
+      }
+      this.onDiscover(this.device.uuid, this.device.name, this.device.rssi)
     } finally {
       this.isScanning = false
     }
@@ -161,11 +155,12 @@ class DeviceManager {
     this.notImplemented('stopAdvertising')
   }
 
-  startScanning(services: string[], reconnect: boolean) {
+  startScanning(services: string[]) {
     if (!this.isScanning) {
       this.characteristics.clear()
       this.isScanning = true
-      this.requestDevice(services, reconnect)
+      this.services = services
+      this.requestDevice()
     }
   }
 
@@ -173,8 +168,16 @@ class DeviceManager {
     this.isScanning = false
   }
 
-  connect(device: string, reconnect: boolean) {
-    this.notImplemented('connect')
+  async connect(device: string, reconnect: boolean) {
+    this.gattServer = await this.bluetoothDevice?.gatt?.connect()
+    await Promise.all(
+      (this.services || []).map((service) =>
+        this.discoverCharacteristics(service)
+      )
+    )
+    if (this.device) {
+      this.onConnect(this.device.uuid)
+    }
   }
 
   disconnect() {
@@ -199,12 +202,13 @@ class DeviceManager {
 
   async subscribe(device: string, characteristic: string) {
     const c = this.characteristics.get(characteristic)
-    await c?.startNotifications()
-    c?.addEventListener('characteristicvaluechanged', (event) => {
-      console.log(event)
-      // @ts-ignore
-      this.valueChanged(characteristic, event.target.value)
-    })
+    if (c) {
+      await c.startNotifications()
+      c.addEventListener('characteristicvaluechanged', (event) => {
+        // @ts-ignore
+        this.valueChanged(characteristic, event.target.value)
+      })
+    }
   }
 
   unsubscribe(device: string, characteristic: string) {
@@ -271,7 +275,7 @@ export default {
     return deviceManager.stopAdvertising()
   },
   startScanning(services: string[], reconnect: boolean) {
-    return deviceManager.startScanning(services, reconnect)
+    return deviceManager.startScanning(services)
   },
   stopScanning() {
     return deviceManager.stopScanning()

@@ -187,16 +187,27 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     public func peripheralManager(_: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        guard let firstRequest = requests.first else {
+            return
+        }
         for request in requests {
             if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString) {
-                onChange?("", characteristic.uuid.uuidString, request.value ?? Data())
-                if request.characteristic.properties.contains(.write) {
-                    peripheralManager?.respond(to: request, withResult: .success)
+                if !characteristic.properties.contains(.write) {
+                    peripheralManager?.respond(to: firstRequest, withResult: .writeNotPermitted)
+                    return
                 }
+                let central = request.central.identifier.uuidString
+                let uuid = characteristic.uuid.uuidString
+                let value = request.value ?? Data()
+                characteristic.value = value
+                onChange?(central, uuid, value)
+                onWrite?(central, uuid, value)
             } else {
-                peripheralManager?.respond(to: request, withResult: .attributeNotFound)
+                peripheralManager?.respond(to: firstRequest, withResult: .attributeNotFound)
+                return
             }
         }
+        peripheralManager?.respond(to: firstRequest, withResult: .success)
     }
 
     public func peripheralManager(_: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
@@ -236,8 +247,8 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         peripheralManager?.stopAdvertising()
     }
 
-    func startScanning(_ services: [String], _ reconnect: Bool) {
-        self.reconnect = reconnect
+    func startScanning(_ services: [String]) {
+        reconnect = reconnect
         servicesFilter = []
         for service in services {
             servicesFilter.append(CBUUID(string: service))
@@ -288,9 +299,12 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
 
     func set(_ characteristic: String, _ value: Data) {
         if let characteristic = getMutableCharacteristic(characteristic) {
-            characteristic.value = value
-            onChange?("", characteristic.uuid.uuidString, value)
-            peripheralManager?.updateValue(value, for: characteristic, onSubscribedCentrals: nil)
+            if let success = peripheralManager?.updateValue(value, for: characteristic, onSubscribedCentrals: nil) {
+                if success {
+                    characteristic.value = value
+                    onChange?("", characteristic.uuid.uuidString, value)
+                }
+            }
         }
     }
 }

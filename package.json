@@ -29,7 +29,7 @@
   "license": "MIT",
   "homepage": "https://github.com/christoffercarlsson/expo-ble#readme",
   "dependencies": {
-    "stedy": "^0.19.2"
+    "stedy": "^0.19.3"
   },
   "devDependencies": {
     "@types/react": "^18.0.25",

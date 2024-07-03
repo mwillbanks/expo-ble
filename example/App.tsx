@@ -84,8 +84,8 @@ export default function App() {
   }, [isReady, isScanning])
 
   useEffect(() => {
-    if (isReady && isConnected) {
-      Bluetooth.read(device, VALUE_CHARACTERISTIC)
+    if (isReady && isConnected && device) {
+      Bluetooth.subscribe(device, VALUE_CHARACTERISTIC)
     }
   }, [isReady, isConnected, device])
 
