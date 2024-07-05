@@ -1,5 +1,10 @@
 package expo.modules.bluetooth
 
+import android.Manifest.permission.ACCESS_FINE_LOCATION
+import android.Manifest.permission.BLUETOOTH_ADVERTISE
+import android.Manifest.permission.BLUETOOTH_CONNECT
+import android.Manifest.permission.BLUETOOTH_SCAN
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -16,6 +21,9 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import androidx.annotation.RequiresApi
+import expo.modules.interfaces.permissions.Permissions.askForPermissionsWithPermissionsManager
+import expo.modules.kotlin.AppContext
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.UUID
@@ -24,17 +32,16 @@ private const val ERROR_NOT_IMPLEMENTED = 0
 
 data class Device(val uuid: String, val name: String, val rssi: Int)
 
-class DeviceManager(private val context: Context) {
+class DeviceManager(private val appContext: AppContext) {
     private var discoveredDevices = mutableMapOf<String, BluetoothDevice>()
     private var bluetoothGatt: BluetoothGatt? = null
 
     private val bluetoothAdapter: BluetoothAdapter? by lazy {
         val bluetoothManager =
-            context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            appContext.reactContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothManager?.adapter
     }
 
-    var onReady: (() -> Unit)? = null
     var onDiscover: ((String, String, Int) -> Unit)? = null
     var onConnect: ((String) -> Unit)? = null
     var onDisconnect: ((String) -> Unit)? = null
@@ -63,6 +70,7 @@ class DeviceManager(private val context: Context) {
         return null
     }
 
+    @SuppressLint("MissingPermission")
     private fun setNotificationsEnabled(
         characteristic: String,
         isEnabled: Boolean,
@@ -70,26 +78,35 @@ class DeviceManager(private val context: Context) {
         getCharacteristic(characteristic)?.let {
             bluetoothGatt?.setCharacteristicNotification(it, isEnabled)
             val descriptor = it.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
-            descriptor.value = if (isEnabled) BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE else BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+            descriptor.value =
+                if (isEnabled) {
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                } else {
+                    BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+                }
             bluetoothGatt?.writeDescriptor(descriptor)
         }
     }
 
     private val gattCallback =
         object : BluetoothGattCallback() {
+            @SuppressLint("MissingPermission")
             override fun onConnectionStateChange(
                 gatt: BluetoothGatt,
                 status: Int,
                 newState: Int,
             ) {
+                bluetoothGatt = gatt
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     gatt.requestMtu(512)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    discoveredDevices.remove(gatt.device.address)
                     onDisconnect?.let { it(gatt.device.address) }
                     gatt.close()
                 }
             }
 
+            @SuppressLint("MissingPermission")
             override fun onMtuChanged(
                 gatt: BluetoothGatt,
                 mtu: Int,
@@ -100,12 +117,13 @@ class DeviceManager(private val context: Context) {
                 }
             }
 
+            @SuppressLint("MissingPermission")
             override fun onServicesDiscovered(
                 gatt: BluetoothGatt,
                 status: Int,
             ) {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    onConnect?.let { it(gatt.device.name) }
+                    onConnect?.let { it(gatt.device.address) }
                 }
             }
 
@@ -141,6 +159,7 @@ class DeviceManager(private val context: Context) {
 
     private val scanCallback =
         object : ScanCallback() {
+            @SuppressLint("MissingPermission")
             override fun onScanResult(
                 callbackType: Int,
                 result: ScanResult,
@@ -169,10 +188,16 @@ class DeviceManager(private val context: Context) {
         managerError(ERROR_NOT_IMPLEMENTED, "$fn is not implemented yet")
     }
 
-    fun start() {
-        if (bluetoothAdapter?.isEnabled == true) {
-            onReady?.let { it() }
-        }
+    @RequiresApi(Build.VERSION_CODES.S)
+    fun start(promise: Promise) {
+        askForPermissionsWithPermissionsManager(
+            appContext.permissions,
+            promise,
+            ACCESS_FINE_LOCATION,
+            BLUETOOTH_CONNECT,
+            BLUETOOTH_SCAN,
+            BLUETOOTH_ADVERTISE,
+        )
     }
 
     fun startAdvertising(
@@ -186,6 +211,7 @@ class DeviceManager(private val context: Context) {
         notImplemented("stopAdvertising")
     }
 
+    @SuppressLint("MissingPermission")
     fun startScanning(services: List<String>) {
         val scanFilters =
             services.map { uuid ->
@@ -200,21 +226,25 @@ class DeviceManager(private val context: Context) {
         bluetoothAdapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, scanCallback)
     }
 
+    @SuppressLint("MissingPermission")
     fun stopScanning() {
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
     }
 
+    @SuppressLint("MissingPermission")
     fun connect(
         device: String,
         reconnect: Boolean,
     ) {
-        bluetoothGatt = getDevice(device)?.connectGatt(context, reconnect, gattCallback)
+        getDevice(device)?.connectGatt(appContext.reactContext, reconnect, gattCallback)
     }
 
+    @SuppressLint("MissingPermission")
     fun disconnect(device: String) {
         bluetoothGatt?.disconnect()
     }
 
+    @SuppressLint("MissingPermission")
     fun read(
         device: String,
         characteristic: String,
@@ -233,9 +263,10 @@ class DeviceManager(private val context: Context) {
         device: String,
         characteristic: String,
     ) {
-        setNotificationsEnabled(characteristic, true)
+        setNotificationsEnabled(characteristic, false)
     }
 
+    @SuppressLint("MissingPermission")
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     fun write(
         device: String,
@@ -247,7 +278,11 @@ class DeviceManager(private val context: Context) {
             bluetoothGatt?.writeCharacteristic(
                 it,
                 value,
-                if (withResponse) BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+                if (withResponse) {
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                } else {
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                },
             )
         }
     }
@@ -268,14 +303,11 @@ class ExpoBluetoothModule : Module() {
         ModuleDefinition {
             Name("ExpoBluetooth")
 
-            Events("onReady", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
+            Events("onDiscover", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
 
             OnCreate {
-                deviceManager = appContext.reactContext?.let { DeviceManager(it) }
+                deviceManager = DeviceManager(appContext)
                 deviceManager?.apply {
-                    onReady = {
-                        sendEvent("onReady")
-                    }
                     onDiscover = { device, name, rssi ->
                         sendEvent("onDiscover", mapOf("device" to device, "name" to name, "rssi" to rssi))
                     }
@@ -297,8 +329,8 @@ class ExpoBluetoothModule : Module() {
                 }
             }
 
-            AsyncFunction("start") {
-                deviceManager?.start()
+            AsyncFunction("start") { promise: Promise ->
+                deviceManager?.start(promise)
             }
 
             AsyncFunction("startAdvertising") { name: String, servicesJSON: String ->

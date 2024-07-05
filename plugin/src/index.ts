@@ -59,6 +59,7 @@ const addAndroidPermissions = (
 
 const withBluetoothAndroidPermissions: ConfigPlugin = (config) => {
   const permissions = [
+    'android.permission.ACCESS_FINE_LOCATION',
     'android.permission.BLUETOOTH_CONNECT',
     'android.permission.BLUETOOTH_SCAN',
     'android.permission.BLUETOOTH_ADVERTISE'

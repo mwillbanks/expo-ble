@@ -19,13 +19,11 @@ export default function App() {
   const [value, setValue] = useState<string>()
 
   useEffect(() => {
-    const readySubscription = Bluetooth.addReadyListener(() => {
-      setReady(true)
-    })
     const discoverSubscription = Bluetooth.addDiscoverListener(
       (event: Bluetooth.DiscoverEvent) => {
         setDevice(event.device)
         setName(event.name)
+        Bluetooth.connect(event.device)
       }
     )
     const connectSubscription = Bluetooth.addConnectListener(() => {
@@ -40,9 +38,10 @@ export default function App() {
         setValue(createFrom(event.value).toString())
       }
     )
-    Bluetooth.start()
+    Bluetooth.start().then(() => {
+      setReady(true)
+    })
     return () => {
-      readySubscription.remove()
       discoverSubscription.remove()
       connectSubscription.remove()
       disconnectSubscription.remove()
@@ -100,6 +99,14 @@ export default function App() {
       Bluetooth.set(VALUE_CHARACTERISTIC, createFrom(value))
     }
   }, [isReady, isConnected, device, role, value])
+
+  if (!isReady) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.heading}>Loading...</Text>
+      </View>
+    )
+  }
 
   return (
     <View style={styles.container}>

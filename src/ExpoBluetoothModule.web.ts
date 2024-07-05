@@ -4,15 +4,12 @@ import { EventEmitter } from 'expo-modules-core'
 import { createFrom } from 'stedy'
 
 const ERROR_NOT_IMPLEMENTED = 0
-const ERROR_BLUETOOTH_UNAVAILABLE = 1
 
 type Device = {
   uuid: string
   name: string
   rssi: number
 }
-
-type ReadyHandler = () => void
 
 type DiscoverHandler = (device: string, name: string, rssi: number) => void
 
@@ -35,7 +32,6 @@ type WriteHandler = (
 type ErrorHandler = (code: number, reason: string, device: string) => void
 
 class DeviceManager {
-  private onReady: ReadyHandler
   private onDiscover: DiscoverHandler
   private onConnect: ConnectHandler
   private onDisconnect: DisconnectHandler
@@ -43,7 +39,6 @@ class DeviceManager {
   private onWrite: WriteHandler
   private onError: ErrorHandler
 
-  private bluetoothAvailable: boolean
   private isScanning: boolean
   private reconnect: boolean
   private gattServer?: BluetoothRemoteGATTServer
@@ -53,7 +48,6 @@ class DeviceManager {
   private characteristics: Map<string, BluetoothRemoteGATTCharacteristic>
 
   constructor({
-    onReady,
     onDiscover,
     onConnect,
     onDisconnect,
@@ -61,7 +55,6 @@ class DeviceManager {
     onWrite,
     onError
   }: {
-    onReady: ReadyHandler
     onDiscover: DiscoverHandler
     onConnect: ConnectHandler
     onDisconnect: DisconnectHandler
@@ -69,14 +62,12 @@ class DeviceManager {
     onWrite: WriteHandler
     onError: ErrorHandler
   }) {
-    this.onReady = onReady
     this.onDiscover = onDiscover
     this.onConnect = onConnect
     this.onDisconnect = onDisconnect
     this.onChange = onChange
     this.onWrite = onWrite
     this.onError = onError
-    this.bluetoothAvailable = 'bluetooth' in navigator
     this.isScanning = false
     this.reconnect = false
     this.characteristics = new Map([])
@@ -92,10 +83,6 @@ class DeviceManager {
 
   private notImplemented(fn: string) {
     this.managerError(ERROR_NOT_IMPLEMENTED, `${fn} is not implemented yet`)
-  }
-
-  private bluetoothUnavailable() {
-    this.managerError(ERROR_BLUETOOTH_UNAVAILABLE, 'Bluetooth unavailable')
   }
 
   private valueChanged(characteristic: string, value: BufferSource) {
@@ -140,11 +127,7 @@ class DeviceManager {
   }
 
   start() {
-    if (this.bluetoothAvailable) {
-      this.onReady()
-    } else {
-      this.bluetoothUnavailable()
-    }
+    return 'bluetooth' in navigator
   }
 
   startAdvertising(name: string, servicesJSON: string) {
@@ -175,6 +158,7 @@ class DeviceManager {
         this.discoverCharacteristics(service)
       )
     )
+    console.log('Connected', this.device)
     if (this.device) {
       this.onConnect(this.device.uuid)
     }
@@ -241,9 +225,6 @@ class DeviceManager {
 const emitter = new EventEmitter({} as any)
 
 const deviceManager = new DeviceManager({
-  onReady: () => {
-    emitter.emit('onReady')
-  },
   onDiscover: (device: string, name: string, rssi: number) => {
     emitter.emit('onDiscover', { device, name, rssi })
   },

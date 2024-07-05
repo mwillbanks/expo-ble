@@ -39,7 +39,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     var centralManager: CBCentralManager?
     var peripheralManager: CBPeripheralManager?
 
-    var bluetoothAvailable = false
+    var bluetoothAvailable: Promise?
 
     var mutableCharacteristics: [CBUUID: CBMutableCharacteristic] = [:]
 
@@ -129,17 +129,23 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
-        if !bluetoothAvailable && peripheral.state == .poweredOn {
-            bluetoothAvailable = true
-            onReady?()
+        guard let available = bluetoothAvailable else { return }
+        if peripheral.state == .poweredOn {
+            available.resolve(true)
+        } else {
+            available.resolve(false)
         }
+        bluetoothAvailable = nil
     }
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if !bluetoothAvailable && central.state == .poweredOn {
-            bluetoothAvailable = true
-            onReady?()
+        guard let available = bluetoothAvailable else { return }
+        if central.state == .poweredOn {
+            available.resolve(true)
+        } else {
+            available.resolve(false)
         }
+        bluetoothAvailable = nil
     }
 
     public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
@@ -219,7 +225,8 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         }
     }
 
-    func start() {
+    func start(_ promise: Promise) {
+        bluetoothAvailable = promise
         centralManager = CBCentralManager(delegate: self, queue: nil)
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
     }
@@ -248,7 +255,6 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     func startScanning(_ services: [String]) {
-        reconnect = reconnect
         servicesFilter = []
         for service in services {
             servicesFilter.append(CBUUID(string: service))
@@ -319,9 +325,6 @@ public class ExpoBluetoothModule: Module {
 
         OnCreate {
             _ = self.deviceManager
-            self.deviceManager.onReady = {
-                self.sendEvent("onReady")
-            }
             self.deviceManager.onDiscover = { (device: String, name: String, rssi: Int8) in
                 self.sendEvent("onDiscover", [
                     "device": device,
@@ -362,8 +365,8 @@ public class ExpoBluetoothModule: Module {
             }
         }
 
-        AsyncFunction("start") {
-            self.deviceManager.start()
+        AsyncFunction("start") { (promise: Promise) in
+            self.deviceManager.start(promise)
         }
 
         AsyncFunction("startAdvertising") { (name: String, servicesJSON: String) in
@@ -374,8 +377,8 @@ public class ExpoBluetoothModule: Module {
             self.deviceManager.stopAdvertising()
         }
 
-        AsyncFunction("startScanning") { (services: [String], reconnect: Bool) in
-            self.deviceManager.startScanning(services, reconnect)
+        AsyncFunction("startScanning") { (services: [String]) in
+            self.deviceManager.startScanning(services)
         }
 
         AsyncFunction("stopScanning") {

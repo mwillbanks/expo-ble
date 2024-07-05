@@ -19,6 +19,46 @@ import {
 } from './ExpoBluetooth.types'
 import ExpoBluetoothModule from './ExpoBluetoothModule'
 
+const emitter = new EventEmitter(
+  ExpoBluetoothModule ?? NativeModulesProxy.ExpoBluetooth
+)
+
+export function addDiscoverListener(
+  listener: (event: DiscoverEvent) => void
+): Subscription {
+  return emitter.addListener<DiscoverEvent>('onDiscover', listener)
+}
+
+export function addConnectListener(
+  listener: (event: ConnectEvent) => void
+): Subscription {
+  return emitter.addListener<ConnectEvent>('onConnect', listener)
+}
+
+export function addDisconnectListener(
+  listener: (event: DisconnectEvent) => void
+): Subscription {
+  return emitter.addListener<DisconnectEvent>('onDisconnect', listener)
+}
+
+export function addChangeListener(
+  listener: (event: ChangeEvent) => void
+): Subscription {
+  return emitter.addListener<ChangeEvent>('onChange', listener)
+}
+
+export function addWriteListener(
+  listener: (event: WriteEvent) => void
+): Subscription {
+  return emitter.addListener<WriteEvent>('onWrite', listener)
+}
+
+export function addErrorListener(
+  listener: (event: ErrorEvent) => void
+): Subscription {
+  return emitter.addListener<ErrorEvent>('onError', listener)
+}
+
 function dataAsBytes(data?: Data): Uint8Array {
   return new Uint8Array(createFrom(data, ENCODING_UTF8))
 }
@@ -61,8 +101,8 @@ function servicesToJSON(services: Service[]): string {
   })
 }
 
-export function start() {
-  return ExpoBluetoothModule.start()
+export async function start() {
+  await ExpoBluetoothModule.start()
 }
 
 export async function startAdvertising(name: string, ...services: Service[]) {
@@ -117,50 +157,6 @@ export async function write(
 
 export async function set(characteristic: string, value: Data) {
   return ExpoBluetoothModule.set(characteristic, dataAsBytes(value))
-}
-
-const emitter = new EventEmitter(
-  ExpoBluetoothModule ?? NativeModulesProxy.ExpoBluetooth
-)
-
-export function addReadyListener(listener: () => void): Subscription {
-  return emitter.addListener('onReady', listener)
-}
-
-export function addDiscoverListener(
-  listener: (event: DiscoverEvent) => void
-): Subscription {
-  return emitter.addListener<DiscoverEvent>('onDiscover', listener)
-}
-
-export function addConnectListener(
-  listener: (event: ConnectEvent) => void
-): Subscription {
-  return emitter.addListener<ConnectEvent>('onConnect', listener)
-}
-
-export function addDisconnectListener(
-  listener: (event: DisconnectEvent) => void
-): Subscription {
-  return emitter.addListener<DisconnectEvent>('onDisconnect', listener)
-}
-
-export function addChangeListener(
-  listener: (event: ChangeEvent) => void
-): Subscription {
-  return emitter.addListener<ChangeEvent>('onChange', listener)
-}
-
-export function addWriteListener(
-  listener: (event: WriteEvent) => void
-): Subscription {
-  return emitter.addListener<WriteEvent>('onWrite', listener)
-}
-
-export function addErrorListener(
-  listener: (event: ErrorEvent) => void
-): Subscription {
-  return emitter.addListener<ErrorEvent>('onError', listener)
 }
 
 export {
