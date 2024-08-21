@@ -4,6 +4,8 @@ import ExpoModulesCore
 let ERROR_NOT_IMPLEMENTED = 0
 let ERROR_BLUETOOTH_UNAVAILABLE = 1
 let ERROR_INVALID_SERVICES = 2
+let ERROR_UNKNOWN_DEVICE = 4
+let ERROR_UNKNOWN_CHARACTERISTIC = 5
 
 struct Device {
     let uuid: String
@@ -28,7 +30,6 @@ struct ServicesDefinition: Decodable, Equatable, Hashable {
 }
 
 class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, CBPeripheralManagerDelegate {
-    var onReady: (() -> Void)?
     var onDiscover: ((String, String, Int8) -> Void)?
     var onConnect: ((String) -> Void)?
     var onDisconnect: ((String) -> Void)?
@@ -66,22 +67,26 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         managerError(ERROR_NOT_IMPLEMENTED, "\(fn) is not implemented yet")
     }
 
-    private func bluetoothUnavailable() {
-        managerError(ERROR_BLUETOOTH_UNAVAILABLE, "Bluetooth unavailable")
-    }
-
     private func invalidServices() {
         managerError(ERROR_INVALID_SERVICES, "Failed to parse service definition")
     }
 
+    private func unknownDevice(_ uuid: String) {
+        onError?(UInt8(ERROR_UNKNOWN_DEVICE), "Uknown device", uuid)
+    }
+
+    private func unknownCharacteristic(_ device: String, _ characteristic: String) {
+        onError?(UInt8(ERROR_UNKNOWN_CHARACTERISTIC), characteristic, device)
+    }
+
     private func getPeripheral(_ uuid: String) -> CBPeripheral? {
-        peripherals.first(where: { $0.value.uuid == uuid })?.key
+        peripherals.first(where: { $0.value.uuid.lowercased() == uuid })?.key
     }
 
     private func getCharacteristic(_ device: String, _ uuid: String) -> (CBPeripheral, CBCharacteristic)? {
         guard let peripheral = getPeripheral(device) else { return nil }
         guard let characteristics = characteristics[peripheral] else { return nil }
-        guard let characteristic = characteristics.first(where: { $0.uuid.uuidString == uuid }) else { return nil }
+        guard let characteristic = characteristics.first(where: { $0.uuid.uuidString.lowercased() == uuid }) else { return nil }
         return (peripheral, characteristic)
     }
 
@@ -151,7 +156,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
         if !peripherals.keys.contains(peripheral) {
             let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-            let device = Device(uuid: peripheral.identifier.uuidString, name: name, rssi: Int8(truncating: rssi))
+            let device = Device(uuid: peripheral.identifier.uuidString.lowercased(), name: name, rssi: Int8(truncating: rssi))
             peripherals[peripheral] = device
             characteristics[peripheral] = []
             peripheral.delegate = self
@@ -270,36 +275,48 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         if let peripheral = getPeripheral(device) {
             self.reconnect = reconnect
             centralManager?.connect(peripheral, options: nil)
+        } else {
+            unknownDevice(device)
         }
     }
 
     func disconnect(_ device: String) {
         if let peripheral = getPeripheral(device) {
             centralManager?.cancelPeripheralConnection(peripheral)
+        } else {
+            unknownDevice(device)
         }
     }
 
     func read(_ device: String, _ characteristic: String) {
         if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
             peripheral.readValue(for: characteristic)
+        } else {
+            unknownCharacteristic(device, characteristic)
         }
     }
 
     func subscribe(_ device: String, _ characteristic: String) {
         if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
             peripheral.setNotifyValue(true, for: characteristic)
+        } else {
+            unknownCharacteristic(device, characteristic)
         }
     }
 
     func unsubscribe(_ device: String, _ characteristic: String) {
         if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
             peripheral.setNotifyValue(false, for: characteristic)
+        } else {
+            unknownCharacteristic(device, characteristic)
         }
     }
 
     func write(_ device: String, _ characteristic: String, _ value: Data, _ withResponse: Bool) {
         if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
             peripheral.writeValue(value, for: characteristic, type: withResponse ? .withResponse : .withoutResponse)
+        } else {
+            unknownCharacteristic(device, characteristic)
         }
     }
 
@@ -311,6 +328,8 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
                     onChange?("", characteristic.uuid.uuidString, value)
                 }
             }
+        } else {
+            unknownCharacteristic("", characteristic)
         }
     }
 }
@@ -321,38 +340,38 @@ public class ExpoBluetoothModule: Module {
     public func definition() -> ModuleDefinition {
         Name("ExpoBluetooth")
 
-        Events("onReady", "onDiscover", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
+        Events("onDiscover", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
 
-        OnCreate {
+        OnStartObserving {
             _ = self.deviceManager
             self.deviceManager.onDiscover = { (device: String, name: String, rssi: Int8) in
                 self.sendEvent("onDiscover", [
-                    "device": device,
+                    "device": device.lowercased(),
                     "name": name,
                     "rssi": rssi,
                 ])
             }
             self.deviceManager.onConnect = { (device: String) in
                 self.sendEvent("onConnect", [
-                    "device": device,
+                    "device": device.lowercased(),
                 ])
             }
             self.deviceManager.onDisconnect = { (device: String) in
                 self.sendEvent("onDisconnect", [
-                    "device": device,
+                    "device": device.lowercased(),
                 ])
             }
             self.deviceManager.onChange = { (device: String, characteristic: String, value: Data) in
                 self.sendEvent("onChange", [
-                    "device": device,
-                    "characteristic": characteristic,
+                    "device": device.lowercased(),
+                    "characteristic": characteristic.lowercased(),
                     "value": value,
                 ])
             }
             self.deviceManager.onWrite = { (device: String, characteristic: String, value: Data) in
                 self.sendEvent("onWrite", [
-                    "device": device,
-                    "characteristic": characteristic,
+                    "device": device.lowercased(),
+                    "characteristic": characteristic.lowercased(),
                     "value": value,
                 ])
             }
@@ -369,47 +388,47 @@ public class ExpoBluetoothModule: Module {
             self.deviceManager.start(promise)
         }
 
-        AsyncFunction("startAdvertising") { (name: String, servicesJSON: String) in
+        Function("startAdvertising") { (name: String, servicesJSON: String) in
             self.deviceManager.startAdvertising(name, servicesJSON)
         }
 
-        AsyncFunction("stopAdvertising") {
+        Function("stopAdvertising") {
             self.deviceManager.stopAdvertising()
         }
 
-        AsyncFunction("startScanning") { (services: [String]) in
+        Function("startScanning") { (services: [String]) in
             self.deviceManager.startScanning(services)
         }
 
-        AsyncFunction("stopScanning") {
+        Function("stopScanning") {
             self.deviceManager.stopScanning()
         }
 
-        AsyncFunction("connect") { (device: String, reconnect: Bool) in
+        Function("connect") { (device: String, reconnect: Bool) in
             self.deviceManager.connect(device, reconnect)
         }
 
-        AsyncFunction("disconnect") { (device: String) in
+        Function("disconnect") { (device: String) in
             self.deviceManager.disconnect(device)
         }
 
-        AsyncFunction("read") { (device: String, characteristic: String) in
+        Function("read") { (device: String, characteristic: String) in
             self.deviceManager.read(device, characteristic)
         }
 
-        AsyncFunction("subscribe") { (device: String, characteristic: String) in
+        Function("subscribe") { (device: String, characteristic: String) in
             self.deviceManager.subscribe(device, characteristic)
         }
 
-        AsyncFunction("unsubscribe") { (device: String, characteristic: String) in
+        Function("unsubscribe") { (device: String, characteristic: String) in
             self.deviceManager.unsubscribe(device, characteristic)
         }
 
-        AsyncFunction("write") { (device: String, characteristic: String, value: Data, withResponse: Bool) in
+        Function("write") { (device: String, characteristic: String, value: Data, withResponse: Bool) in
             self.deviceManager.write(device, characteristic, value, withResponse)
         }
 
-        AsyncFunction("set") { (characteristic: String, value: Data) in
+        Function("set") { (characteristic: String, value: Data) in
             self.deviceManager.set(characteristic, value)
         }
     }

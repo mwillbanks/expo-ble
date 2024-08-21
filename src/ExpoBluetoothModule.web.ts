@@ -4,6 +4,7 @@ import { EventEmitter } from 'expo-modules-core'
 import { createFrom } from 'stedy'
 
 const ERROR_NOT_IMPLEMENTED = 0
+const ERROR_CONNECTION_FAILED = 6
 
 type Device = {
   uuid: string
@@ -152,15 +153,21 @@ class DeviceManager {
   }
 
   async connect(device: string, reconnect: boolean) {
-    this.gattServer = await this.bluetoothDevice?.gatt?.connect()
-    await Promise.all(
-      (this.services || []).map((service) =>
-        this.discoverCharacteristics(service)
+    try {
+      this.gattServer = await this.bluetoothDevice?.gatt?.connect()
+      await Promise.all(
+        (this.services || []).map((service) =>
+          this.discoverCharacteristics(service)
+        )
       )
-    )
-    console.log('Connected', this.device)
-    if (this.device) {
-      this.onConnect(this.device.uuid)
+      if (this.device) {
+        this.onConnect(this.device.uuid)
+      }
+    } catch (e) {
+      this.managerError(
+        ERROR_CONNECTION_FAILED,
+        e.message || 'Connection failed'
+      )
     }
   }
 
@@ -184,14 +191,14 @@ class DeviceManager {
       })
   }
 
-  async subscribe(device: string, characteristic: string) {
+  subscribe(device: string, characteristic: string) {
     const c = this.characteristics.get(characteristic)
     if (c) {
-      await c.startNotifications()
       c.addEventListener('characteristicvaluechanged', (event) => {
         // @ts-ignore
         this.valueChanged(characteristic, event.target.value)
       })
+      c.startNotifications()
     }
   }
 
@@ -250,31 +257,31 @@ export default {
     return deviceManager.start()
   },
   startAdvertising(name: string, servicesJSON: string) {
-    return deviceManager.startAdvertising(name, servicesJSON)
+    deviceManager.startAdvertising(name, servicesJSON)
   },
   stopAdvertising() {
-    return deviceManager.stopAdvertising()
+    deviceManager.stopAdvertising()
   },
   startScanning(services: string[], reconnect: boolean) {
-    return deviceManager.startScanning(services)
+    deviceManager.startScanning(services)
   },
   stopScanning() {
-    return deviceManager.stopScanning()
+    deviceManager.stopScanning()
   },
   connect(device: string, reconnect: boolean) {
-    return deviceManager.connect(device, reconnect)
+    deviceManager.connect(device, reconnect)
   },
   disconnect(device: string) {
-    return deviceManager.disconnect()
+    deviceManager.disconnect()
   },
   read(device: string, characteristic: string) {
-    return deviceManager.read(device, characteristic)
+    deviceManager.read(device, characteristic)
   },
   subscribe(device: string, characteristic: string) {
-    return deviceManager.subscribe(device, characteristic)
+    deviceManager.subscribe(device, characteristic)
   },
   unsubscribe(device: string, characteristic: string) {
-    return deviceManager.unsubscribe(device, characteristic)
+    deviceManager.unsubscribe(device, characteristic)
   },
   write(
     device: string,
@@ -282,9 +289,9 @@ export default {
     value: Uint8Array,
     withResponse: boolean
   ) {
-    return deviceManager.write(device, characteristic, value, withResponse)
+    deviceManager.write(device, characteristic, value, withResponse)
   },
   set(characteristic: string, value: Uint8Array) {
-    return deviceManager.set(characteristic, value)
+    deviceManager.set(characteristic, value)
   }
 }

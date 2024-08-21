@@ -50,8 +50,9 @@ class DeviceManager(private val appContext: AppContext) {
     var onError: ((Byte, String?, String?) -> Unit)? = null
 
     private fun getDevice(address: String): BluetoothDevice? {
-        if (discoveredDevices.containsKey(address)) {
-            return discoveredDevices[address]
+        val key = address.uppercase()
+        if (discoveredDevices.containsKey(key)) {
+            return discoveredDevices[key]
         }
         return null
     }
@@ -165,7 +166,7 @@ class DeviceManager(private val appContext: AppContext) {
                 result: ScanResult,
             ) {
                 discoveredDevices[result.device.address] = result.device
-                onDiscover?.let { it(result.device.address, result.device.name, result.rssi) }
+                onDiscover?.let { it(result.device.address, result.device?.name ?: "Unknown", result.rssi) }
             }
         }
 
@@ -305,26 +306,26 @@ class ExpoBluetoothModule : Module() {
 
             Events("onDiscover", "onConnect", "onDisconnect", "onChange", "onWrite", "onError")
 
-            OnCreate {
+            OnStartObserving {
                 deviceManager = DeviceManager(appContext)
                 deviceManager?.apply {
                     onDiscover = { device, name, rssi ->
-                        sendEvent("onDiscover", mapOf("device" to device, "name" to name, "rssi" to rssi))
+                        sendEvent("onDiscover", mapOf("device" to device.lowercase(), "name" to name, "rssi" to rssi))
                     }
                     onConnect = { device ->
-                        sendEvent("onConnect", mapOf("device" to device))
+                        sendEvent("onConnect", mapOf("device" to device.lowercase()))
                     }
                     onDisconnect = { device ->
-                        sendEvent("onDisconnect", mapOf("device" to device))
+                        sendEvent("onDisconnect", mapOf("device" to device.lowercase()))
                     }
                     onChange = { device, characteristic, value ->
-                        sendEvent("onChange", mapOf("device" to device, "characteristic" to characteristic, "value" to value))
+                        sendEvent("onChange", mapOf("device" to device.lowercase(), "characteristic" to characteristic.lowercase(), "value" to value))
                     }
                     onWrite = { device, characteristic, value ->
-                        sendEvent("onWrite", mapOf("device" to device, "characteristic" to characteristic, "value" to value))
+                        sendEvent("onWrite", mapOf("device" to device.lowercase(), "characteristic" to characteristic.lowercase(), "value" to value))
                     }
                     onError = { code, reason, device ->
-                        sendEvent("onError", mapOf("code" to code, "reason" to (reason ?: ""), "device" to (device ?: "")))
+                        sendEvent("onError", mapOf("code" to code, "reason" to (reason ?: ""), "device" to (device?.lowercase() ?: "")))
                     }
                 }
             }
@@ -333,47 +334,47 @@ class ExpoBluetoothModule : Module() {
                 deviceManager?.start(promise)
             }
 
-            AsyncFunction("startAdvertising") { name: String, servicesJSON: String ->
+            Function("startAdvertising") { name: String, servicesJSON: String ->
                 deviceManager?.startAdvertising(name, servicesJSON)
             }
 
-            AsyncFunction("stopAdvertising") {
+            Function("stopAdvertising") {
                 deviceManager?.stopAdvertising()
             }
 
-            AsyncFunction("startScanning") { services: List<String> ->
+            Function("startScanning") { services: List<String> ->
                 deviceManager?.startScanning(services)
             }
 
-            AsyncFunction("stopScanning") {
+            Function("stopScanning") {
                 deviceManager?.stopScanning()
             }
 
-            AsyncFunction("connect") { device: String, reconnect: Boolean ->
+            Function("connect") { device: String, reconnect: Boolean ->
                 deviceManager?.connect(device, reconnect)
             }
 
-            AsyncFunction("disconnect") { device: String ->
+            Function("disconnect") { device: String ->
                 deviceManager?.disconnect(device)
             }
 
-            AsyncFunction("read") { device: String, characteristic: String ->
+            Function("read") { device: String, characteristic: String ->
                 deviceManager?.read(device, characteristic)
             }
 
-            AsyncFunction("subscribe") { device: String, characteristic: String ->
+            Function("subscribe") { device: String, characteristic: String ->
                 deviceManager?.subscribe(device, characteristic)
             }
 
-            AsyncFunction("unsubscribe") { device: String, characteristic: String ->
+            Function("unsubscribe") { device: String, characteristic: String ->
                 deviceManager?.unsubscribe(device, characteristic)
             }
 
-            AsyncFunction("write") { device: String, characteristic: String, value: ByteArray, withResponse: Boolean ->
+            Function("write") { device: String, characteristic: String, value: ByteArray, withResponse: Boolean ->
                 deviceManager?.write(device, characteristic, value, withResponse)
             }
 
-            AsyncFunction("set") { characteristic: String, value: ByteArray ->
+            Function("set") { characteristic: String, value: ByteArray ->
                 deviceManager?.set(characteristic, value)
             }
         }

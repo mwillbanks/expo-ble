@@ -101,47 +101,52 @@ function servicesToJSON(services: Service[]): string {
   })
 }
 
-export async function start() {
-  await ExpoBluetoothModule.start()
+export async function start(): Promise<boolean> {
+  try {
+    const enabled = await ExpoBluetoothModule.start()
+    return enabled
+  } catch {
+    return false
+  }
 }
 
-export async function startAdvertising(name: string, ...services: Service[]) {
+export function startAdvertising(name: string, ...services: Service[]) {
   return ExpoBluetoothModule.startAdvertising(name, servicesToJSON(services))
 }
 
-export async function stopAdvertising() {
+export function stopAdvertising() {
   return ExpoBluetoothModule.stopAdvertising()
 }
 
-export async function startScanning(...services: string[]) {
+export function startScanning(...services: string[]) {
   return ExpoBluetoothModule.startScanning(services)
 }
 
-export async function stopScanning() {
+export function stopScanning() {
   return ExpoBluetoothModule.stopScanning()
 }
 
-export async function connect(device: string, reconnect: boolean = false) {
+export function connect(device: string, reconnect: boolean = false) {
   return ExpoBluetoothModule.connect(device, reconnect)
 }
 
-export async function disconnect(device: string) {
+export function disconnect(device: string) {
   return ExpoBluetoothModule.disconnect(device)
 }
 
-export async function read(device: string, characteristic: string) {
+export function read(device: string, characteristic: string) {
   return ExpoBluetoothModule.read(device, characteristic)
 }
 
-export async function subscribe(device: string, characteristic: string) {
+export function subscribe(device: string, characteristic: string) {
   return ExpoBluetoothModule.subscribe(device, characteristic)
 }
 
-export async function unsubscribe(device: string, characteristic: string) {
+export function unsubscribe(device: string, characteristic: string) {
   return ExpoBluetoothModule.unsubscribe(device, characteristic)
 }
 
-export async function write(
+export function write(
   device: string,
   characteristic: string,
   value: Data,
@@ -155,7 +160,7 @@ export async function write(
   )
 }
 
-export async function set(characteristic: string, value: Data) {
+export function set(characteristic: string, value: Data) {
   return ExpoBluetoothModule.set(characteristic, dataAsBytes(value))
 }
 
