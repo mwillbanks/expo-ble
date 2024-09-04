@@ -260,21 +260,27 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     func startScanning(_ services: [String]) {
-        servicesFilter = []
-        for service in services {
-            servicesFilter.append(CBUUID(string: service))
+        if centralManager?.isScanning == false {
+            servicesFilter = []
+            for service in services {
+                servicesFilter.append(CBUUID(string: service))
+            }
+            centralManager?.scanForPeripherals(withServices: servicesFilter, options: nil)
         }
-        centralManager?.scanForPeripherals(withServices: servicesFilter, options: nil)
     }
 
     func stopScanning() {
-        centralManager?.stopScan()
+        if centralManager?.isScanning == true {
+            centralManager?.stopScan()
+        }
     }
 
     func connect(_ device: String, _ reconnect: Bool) {
         if let peripheral = getPeripheral(device) {
-            self.reconnect = reconnect
-            centralManager?.connect(peripheral, options: nil)
+            if peripheral.state == .disconnected {
+                self.reconnect = reconnect
+                centralManager?.connect(peripheral, options: nil)
+            }
         } else {
             unknownDevice(device)
         }
