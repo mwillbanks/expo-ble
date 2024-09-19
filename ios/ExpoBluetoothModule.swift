@@ -231,9 +231,13 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
     }
 
     func start(_ promise: Promise) {
-        bluetoothAvailable = promise
-        centralManager = CBCentralManager(delegate: self, queue: nil)
-        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
+        if centralManager == nil || peripheralManager == nil {
+            bluetoothAvailable = promise
+            centralManager = CBCentralManager(delegate: self, queue: nil)
+            peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
+        } else {
+            promise.resolve(true)
+        }
     }
 
     func startAdvertising(_ name: String, _ servicesJSON: String) {
