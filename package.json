@@ -13,7 +13,9 @@
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
     "open:ios": "xed example/ios",
-    "open:android": "open -a \"Android Studio\" example/android"
+    "open:android": "open -a \"Android Studio\" example/android",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "keywords": [
     "react-native",
@@ -29,17 +31,17 @@
   "license": "MIT",
   "homepage": "https://github.com/christoffercarlsson/expo-ble#readme",
   "dependencies": {
-    "stedy": "^0.19.3"
+    "stedy": "^0.20.0"
   },
   "devDependencies": {
-    "@types/react": "^18.0.25",
+    "@types/react": "^18.3.12",
     "@types/web-bluetooth": "^0.0.20",
-    "expo-module-scripts": "^3.5.2",
-    "expo-modules-core": "^1.12.14"
+    "expo-module-scripts": "^4.0.0",
+    "expo-modules-core": "^2.0.0-preview.9"
   },
   "peerDependencies": {
-    "expo": "*",
-    "react": "*",
-    "react-native": "*"
+    "expo": "~52.0.0-preview.19",
+    "react": "18.3.1",
+    "react-native": "0.76.1"
   }
 }

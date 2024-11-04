@@ -1,8 +1,4 @@
-import {
-  NativeModulesProxy,
-  EventEmitter,
-  Subscription
-} from 'expo-modules-core'
+import { LegacyEventEmitter as EventEmitter, type EventSubscription as Subscription, NativeModulesProxy } from 'expo-modules-core';
 import { ENCODING_UTF8, createFrom } from 'stedy'
 
 import {

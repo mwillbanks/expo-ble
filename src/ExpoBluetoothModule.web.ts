@@ -1,6 +1,6 @@
 /// <reference types="web-bluetooth" />
 
-import { EventEmitter } from 'expo-modules-core'
+import { LegacyEventEmitter as EventEmitter } from 'expo-modules-core'
 import { createFrom } from 'stedy'
 
 const ERROR_NOT_IMPLEMENTED = 0
@@ -215,11 +215,11 @@ class DeviceManager {
     if (withResponse) {
       this.characteristics
         .get(characteristic)
-        ?.writeValueWithResponse(value.buffer)
+        ?.writeValueWithResponse(value)
     } else {
       this.characteristics
         .get(characteristic)
-        ?.writeValueWithoutResponse(value.buffer)
+        ?.writeValueWithoutResponse(value)
     }
     this.valueWritten(characteristic, value)
   }
