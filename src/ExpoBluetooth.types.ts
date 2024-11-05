@@ -18,6 +18,7 @@ export type DiscoverEvent = {
   device: string
   name: string
   rssi: number
+  services: string[]
 }
 
 export type ConnectEvent = {

@@ -30,7 +30,12 @@ import java.util.UUID
 
 private const val ERROR_NOT_IMPLEMENTED = 0
 
-data class Device(val uuid: String, val name: String, val rssi: Int)
+data class Device(
+    val uuid: String,
+    val name: String,
+    val rssi: Int,
+    val services: List<String>
+)
 
 class DeviceManager(private val appContext: AppContext) {
     private var discoveredDevices = mutableMapOf<String, BluetoothDevice>()
@@ -42,7 +47,7 @@ class DeviceManager(private val appContext: AppContext) {
         bluetoothManager?.adapter
     }
 
-    var onDiscover: ((String, String, Int) -> Unit)? = null
+    var onDiscover: ((String, String, Int, List<String>) -> Unit)? = null
     var onConnect: ((String) -> Unit)? = null
     var onDisconnect: ((String) -> Unit)? = null
     var onChange: ((String, String, ByteArray) -> Unit)? = null
@@ -165,8 +170,13 @@ class DeviceManager(private val appContext: AppContext) {
                 callbackType: Int,
                 result: ScanResult,
             ) {
-                discoveredDevices[result.device.address] = result.device
-                onDiscover?.let { it(result.device.address, result.device?.name ?: "Unknown", result.rssi) }
+                val device = result.device
+                val deviceId = device.address
+                val deviceName = device.name ?: result.scanRecord?.deviceName ?: "Unknown"
+                val serviceUUIDs = result.scanRecord?.serviceUuids?.map { it.uuid.toString() } ?: emptyList()
+
+                discoveredDevices[result.device.address] = result.device;
+                onDiscover?.let { it(deviceId, deviceName, result.rssi, serviceUuids) }
             }
         }
 
@@ -309,8 +319,8 @@ class ExpoBluetoothModule : Module() {
             OnStartObserving {
                 deviceManager = DeviceManager(appContext)
                 deviceManager?.apply {
-                    onDiscover = { device, name, rssi ->
-                        sendEvent("onDiscover", mapOf("device" to device.lowercase(), "name" to name, "rssi" to rssi))
+                    onDiscover = { device, name, rssi, services ->
+                        sendEvent("onDiscover", mapOf("device" to device.lowercase(), "name" to name, "rssi" to rssi, "services" to services))
                     }
                     onConnect = { device ->
                         sendEvent("onConnect", mapOf("device" to device.lowercase()))

@@ -11,6 +11,7 @@ struct Device {
     let uuid: String
     let name: String
     let rssi: Int8
+    let services: [String]
 }
 
 struct CharacteristicDefinition: Decodable, Equatable, Hashable {
@@ -29,8 +30,10 @@ struct ServicesDefinition: Decodable, Equatable, Hashable {
     let services: [ServiceDefinition]
 }
 
-class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, CBPeripheralManagerDelegate {
-    var onDiscover: ((String, String, Int8) -> Void)?
+class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate,
+    CBPeripheralManagerDelegate
+{
+    var onDiscover: ((String, String, Int8, [String]) -> Void)?
     var onConnect: ((String) -> Void)?
     var onDisconnect: ((String) -> Void)?
     var onChange: ((String, String, Data) -> Void)?
@@ -83,10 +86,21 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         peripherals.first(where: { $0.value.uuid.lowercased() == uuid })?.key
     }
 
-    private func getCharacteristic(_ device: String, _ uuid: String) -> (CBPeripheral, CBCharacteristic)? {
+    private func getCharacteristic(_ device: String, _ uuid: String) -> (
+        CBPeripheral, CBCharacteristic
+    )? {
         guard let peripheral = getPeripheral(device) else { return nil }
         guard let characteristics = characteristics[peripheral] else { return nil }
-        guard let characteristic = characteristics.first(where: { $0.uuid.uuidString.lowercased() == uuid }) else { return nil }
+        let uuidLower = uuid.lowercased()
+        let uuidVariants = [
+            uuidLower, String(uuidLower.split(separator: "-").first?.suffix(4) ?? "").lowercased(),
+        ]
+
+        guard
+            let characteristic = characteristics.first(where: {
+                uuidVariants.contains($0.uuid.uuidString.lowercased())
+            })
+        else { return nil }
         return (peripheral, characteristic)
     }
 
@@ -112,7 +126,9 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
                 continue
             }
         }
-        return CBMutableCharacteristic(type: CBUUID(string: def.uuid), properties: properties, value: nil, permissions: permissions)
+        return CBMutableCharacteristic(
+            type: CBUUID(string: def.uuid), properties: properties, value: nil,
+            permissions: permissions)
     }
 
     private func createService(_ def: ServiceDefinition) -> CBMutableService {
@@ -153,14 +169,29 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         bluetoothAvailable = nil
     }
 
-    public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi: NSNumber) {
+    public func centralManager(
+        _: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any],
+        rssi: NSNumber
+    ) {
         if !peripherals.keys.contains(peripheral) {
-            let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-            let device = Device(uuid: peripheral.identifier.uuidString.lowercased(), name: name, rssi: Int8(truncating: rssi))
+            // Try to get name from different sources in order of preference
+            let name =
+                peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
+                ?? "Unknown"
+
+            // Get advertised service UUIDs if available
+            let serviceUUIDs =
+                (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map {
+                    $0.uuidString.lowercased()
+                } ?? []
+
+            let device = Device(
+                uuid: peripheral.identifier.uuidString.lowercased(), name: name,
+                rssi: Int8(truncating: rssi), services: serviceUUIDs)
             peripherals[peripheral] = device
             characteristics[peripheral] = []
             peripheral.delegate = self
-            onDiscover?(device.uuid, device.name, device.rssi)
+            onDiscover?(device.uuid, device.name, device.rssi, device.services)
         }
     }
 
@@ -168,7 +199,9 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         peripheral.discoverServices(servicesFilter)
     }
 
-    public func centralManager(_: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error _: Error?) {
+    public func centralManager(
+        _: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error _: Error?
+    ) {
         guard let device = peripherals[peripheral] else { return }
         onDisconnect?(device.uuid)
         if !reconnect {
@@ -185,24 +218,32 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
         }
     }
 
-    public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error _: Error?) {
+    public func peripheral(
+        _ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
+        error _: Error?
+    ) {
         guard let device = peripherals[peripheral] else { return }
         characteristics[peripheral]?.append(contentsOf: service.characteristics ?? [])
         onConnect?(device.uuid)
     }
 
-    public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error _: Error?) {
+    public func peripheral(
+        _ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
+        error _: Error?
+    ) {
         guard let device = peripherals[peripheral] else { return }
         guard let value = characteristic.value else { return }
         onChange?(device.uuid, characteristic.uuid.uuidString, value)
     }
 
-    public func peripheralManager(_: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+    public func peripheralManager(_: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest])
+    {
         guard let firstRequest = requests.first else {
             return
         }
         for request in requests {
-            if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString) {
+            if let characteristic = getMutableCharacteristic(request.characteristic.uuid.uuidString)
+            {
                 if !characteristic.properties.contains(.write) {
                     peripheralManager?.respond(to: firstRequest, withResult: .writeNotPermitted)
                     return
@@ -324,7 +365,8 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
 
     func write(_ device: String, _ characteristic: String, _ value: Data, _ withResponse: Bool) {
         if let (peripheral, characteristic) = getCharacteristic(device, characteristic) {
-            peripheral.writeValue(value, for: characteristic, type: withResponse ? .withResponse : .withoutResponse)
+            peripheral.writeValue(
+                value, for: characteristic, type: withResponse ? .withResponse : .withoutResponse)
         } else {
             unknownCharacteristic(device, characteristic)
         }
@@ -332,7 +374,9 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, C
 
     func set(_ characteristic: String, _ value: Data) {
         if let characteristic = getMutableCharacteristic(characteristic) {
-            if let success = peripheralManager?.updateValue(value, for: characteristic, onSubscribedCentrals: nil) {
+            if let success = peripheralManager?.updateValue(
+                value, for: characteristic, onSubscribedCentrals: nil)
+            {
                 if success {
                     characteristic.value = value
                     onChange?("", characteristic.uuid.uuidString, value)
@@ -354,43 +398,57 @@ public class ExpoBluetoothModule: Module {
 
         OnStartObserving {
             _ = self.deviceManager
-            self.deviceManager.onDiscover = { (device: String, name: String, rssi: Int8) in
-                self.sendEvent("onDiscover", [
-                    "device": device.lowercased(),
-                    "name": name,
-                    "rssi": rssi,
-                ])
+            self.deviceManager.onDiscover = {
+                (device: String, name: String, rssi: Int8, services: [String]) in
+                self.sendEvent(
+                    "onDiscover",
+                    [
+                        "device": device.lowercased(),
+                        "name": name,
+                        "rssi": rssi,
+                        "services": services,
+                    ])
             }
             self.deviceManager.onConnect = { (device: String) in
-                self.sendEvent("onConnect", [
-                    "device": device.lowercased(),
-                ])
+                self.sendEvent(
+                    "onConnect",
+                    [
+                        "device": device.lowercased()
+                    ])
             }
             self.deviceManager.onDisconnect = { (device: String) in
-                self.sendEvent("onDisconnect", [
-                    "device": device.lowercased(),
-                ])
+                self.sendEvent(
+                    "onDisconnect",
+                    [
+                        "device": device.lowercased()
+                    ])
             }
             self.deviceManager.onChange = { (device: String, characteristic: String, value: Data) in
-                self.sendEvent("onChange", [
-                    "device": device.lowercased(),
-                    "characteristic": characteristic.lowercased(),
-                    "value": value,
-                ])
+                self.sendEvent(
+                    "onChange",
+                    [
+                        "device": device.lowercased(),
+                        "characteristic": characteristic.lowercased(),
+                        "value": value,
+                    ])
             }
             self.deviceManager.onWrite = { (device: String, characteristic: String, value: Data) in
-                self.sendEvent("onWrite", [
-                    "device": device.lowercased(),
-                    "characteristic": characteristic.lowercased(),
-                    "value": value,
-                ])
+                self.sendEvent(
+                    "onWrite",
+                    [
+                        "device": device.lowercased(),
+                        "characteristic": characteristic.lowercased(),
+                        "value": value,
+                    ])
             }
             self.deviceManager.onError = { (code: UInt8, reason: String?, device: String?) in
-                self.sendEvent("onError", [
-                    "code": code,
-                    "reason": reason ?? "",
-                    "device": device ?? "",
-                ])
+                self.sendEvent(
+                    "onError",
+                    [
+                        "code": code,
+                        "reason": reason ?? "",
+                        "device": device ?? "",
+                    ])
             }
         }
 
@@ -434,7 +492,8 @@ public class ExpoBluetoothModule: Module {
             self.deviceManager.unsubscribe(device, characteristic)
         }
 
-        Function("write") { (device: String, characteristic: String, value: Data, withResponse: Bool) in
+        Function("write") {
+            (device: String, characteristic: String, value: Data, withResponse: Bool) in
             self.deviceManager.write(device, characteristic, value, withResponse)
         }
 
