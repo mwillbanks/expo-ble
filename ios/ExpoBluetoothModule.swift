@@ -91,14 +91,18 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate,
     )? {
         guard let peripheral = getPeripheral(device) else { return nil }
         guard let characteristics = characteristics[peripheral] else { return nil }
-        let uuidLower = uuid.lowercased()
+        let uuidPart = String(uuid.split(separator: "-").first?.suffix(4) ?? "").lowercased()
         let uuidVariants = [
-            uuidLower, String(uuidLower.split(separator: "-").first?.suffix(4) ?? "").lowercased(),
+            uuid, uuidPart,
         ]
 
         guard
             let characteristic = characteristics.first(where: {
+                // check the characteristic uuid and the last 4 characters of the uuid
                 uuidVariants.contains($0.uuid.uuidString.lowercased())
+                    || uuidVariants.contains(
+                        ($0.uuid.uuidString.split(separator: "-").first?.suffix(4) ?? "")
+                            .lowercased())
             })
         else { return nil }
         return (peripheral, characteristic)
@@ -196,7 +200,7 @@ class DeviceManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate,
     }
 
     public func centralManager(_: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.discoverServices(servicesFilter)
+        peripheral.discoverServices(nil)  // Discover all services rather than just services passed in
     }
 
     public func centralManager(

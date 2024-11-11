@@ -1,6 +1,6 @@
 {
   "name": "@sparklaboratory/expo-ble",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Bluetooth Low Energy for Expo",
   "main": "build/index.js",
   "types": "build/index.d.ts",
